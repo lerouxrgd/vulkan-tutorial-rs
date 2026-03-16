@@ -1,0 +1,9 @@
+[package]
+name = "vulkan-tuto-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+ash = "0.38"
+sdl3 = { version = "0.17", features = ["ash"] }
