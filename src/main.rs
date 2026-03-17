@@ -1,6 +1,7 @@
 mod logging;
 
 use std::ffi::{CStr, CString, c_char};
+use std::slice;
 
 use anyhow::anyhow;
 use ash::ext::debug_utils;
@@ -18,9 +19,13 @@ struct HelloTriangleApp {
     instance: ash::Instance,
     debug_utils: Option<DebugUtils>,
     physical_device: vk::PhysicalDevice,
+    device: ash::Device,
+    queue: vk::Queue,
 }
 
 impl HelloTriangleApp {
+    const REQUIRED_DEVICE_EXTENSIONS: &[&CStr] = &[khr::swapchain::NAME];
+
     pub fn new() -> anyhow::Result<Self> {
         // Initialize SDL
         let sdl_context = sdl3::init()?;
@@ -71,7 +76,7 @@ impl HelloTriangleApp {
             None
         };
 
-        // Setup device
+        // Select physical device
         let devices = unsafe { instance.enumerate_physical_devices()? };
         let physical_device = devices
             .into_iter()
@@ -87,6 +92,38 @@ impl HelloTriangleApp {
             .to_string_lossy();
         log::info!("Selected device: {device_name}");
 
+        // Create logical device
+        let queue_families =
+            unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
+        let queue_family = queue_families
+            .iter()
+            .enumerate()
+            .find(|(_, qf)| qf.queue_flags.contains(vk::QueueFlags::GRAPHICS))
+            .map(|(i, _)| i as u32)
+            .ok_or_else(|| anyhow!("No graphics queue family found"))?;
+        let queue_priorities = [0.5]; // implies queue_count == 1
+        let queue_ci = vk::DeviceQueueCreateInfo::default()
+            .queue_family_index(queue_family)
+            .queue_priorities(&queue_priorities);
+        let extension_ptrs: Vec<*const c_char> = Self::REQUIRED_DEVICE_EXTENSIONS
+            .iter()
+            .map(|e| e.as_ptr())
+            .collect();
+        let mut vulkan_1_3_features =
+            vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true);
+        let mut extended_dynamic_state_features =
+            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default()
+                .extended_dynamic_state(true);
+        let mut features = vk::PhysicalDeviceFeatures2::default()
+            .push_next(&mut vulkan_1_3_features)
+            .push_next(&mut extended_dynamic_state_features);
+        let device_ci = vk::DeviceCreateInfo::default()
+            .queue_create_infos(slice::from_ref(&queue_ci))
+            .enabled_extension_names(&extension_ptrs)
+            .push_next(&mut features);
+        let device = unsafe { instance.create_device(physical_device, &device_ci, None)? };
+        let queue = unsafe { device.get_device_queue(queue_family, 0) }; // queue index 0
+
         Ok(Self {
             sdl_context,
             window,
@@ -94,6 +131,8 @@ impl HelloTriangleApp {
             instance,
             debug_utils,
             physical_device,
+            device,
+            queue,
         })
     }
 
@@ -110,17 +149,17 @@ impl HelloTriangleApp {
             .any(|qfp| qfp.queue_flags.contains(vk::QueueFlags::GRAPHICS));
 
         // Check if all required device extensions are available
-        const REQUIRED_DEVICE_EXTENSIONS: &[&CStr] = &[khr::swapchain::NAME];
         let available_extensions = unsafe {
             instance
                 .enumerate_device_extension_properties(physical_device)
                 .unwrap_or_default()
         };
-        let supports_all_required_extensions = REQUIRED_DEVICE_EXTENSIONS.iter().all(|&required| {
-            available_extensions
-                .iter()
-                .any(|available| available.extension_name_as_c_str().ok() == Some(required))
-        });
+        let supports_all_required_extensions =
+            Self::REQUIRED_DEVICE_EXTENSIONS.iter().all(|&required| {
+                available_extensions
+                    .iter()
+                    .any(|available| available.extension_name_as_c_str().ok() == Some(required))
+            });
 
         // Check if the physical device supports the required features
         let mut vulkan_1_3_features = vk::PhysicalDeviceVulkan13Features::default();
@@ -161,6 +200,7 @@ impl HelloTriangleApp {
 impl Drop for HelloTriangleApp {
     fn drop(&mut self) {
         unsafe {
+            self.device.destroy_device(None);
             if let Some(mut debug_utils) = self.debug_utils.take() {
                 debug_utils.destroy();
             }
