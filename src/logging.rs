@@ -4,16 +4,16 @@ use ash::ext::debug_utils;
 use ash::vk;
 
 pub struct DebugUtils {
-    loader: debug_utils::Instance,
-    messenger: vk::DebugUtilsMessengerEXT,
+    fns: debug_utils::Instance,
+    handle: vk::DebugUtilsMessengerEXT,
 }
 
 impl DebugUtils {
     pub fn new(entry: &ash::Entry, instance: &ash::Instance) -> anyhow::Result<Self> {
-        let loader = debug_utils::Instance::new(entry, instance);
+        let fns = debug_utils::Instance::new(entry, instance);
         let ci = DebugUtils::messenger_ci();
-        let messenger = unsafe { loader.create_debug_utils_messenger(&ci, None)? };
-        Ok(Self { loader, messenger })
+        let handle = unsafe { fns.create_debug_utils_messenger(&ci, None)? };
+        Ok(Self { fns, handle })
     }
 
     /// Builds a `[vk::DebugUtilsMessengerCreateInfoEXT]()` wired to a Rust logging callback.
@@ -43,10 +43,7 @@ impl DebugUtils {
     /// - Must be called at most once. Calling it more than once is undefined
     ///   behaviour as the underlying handle becomes invalid after the first call.
     pub unsafe fn destroy(&mut self) {
-        unsafe {
-            self.loader
-                .destroy_debug_utils_messenger(self.messenger, None)
-        };
+        unsafe { self.fns.destroy_debug_utils_messenger(self.handle, None) };
     }
 }
 
