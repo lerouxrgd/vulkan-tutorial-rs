@@ -1,14 +1,17 @@
 mod logging;
+mod surface;
+mod swap_chain;
 
 use std::ffi::{CStr, CString, c_char};
-use std::{ptr, slice};
+use std::slice;
 
-use anyhow::{anyhow, ensure};
+use anyhow::anyhow;
 use ash::ext::debug_utils;
 use ash::{khr, vk};
-use sdl3::sys::vulkan::SDL_Vulkan_CreateSurface;
+use swap_chain::SwapChain;
 
 use crate::logging::DebugUtils;
+use crate::surface::Surface;
 
 const WIDTH: u32 = 1080;
 const HEIGHT: u32 = 1080;
@@ -23,6 +26,7 @@ struct HelloTriangleApp {
     physical_device: vk::PhysicalDevice,
     device: ash::Device,
     queue: vk::Queue,
+    swap_chain: SwapChain,
 }
 
 impl HelloTriangleApp {
@@ -134,6 +138,9 @@ impl HelloTriangleApp {
         let device = unsafe { instance.create_device(physical_device, &device_ci, None)? };
         let queue = unsafe { device.get_device_queue(queue_family, 0) }; // queue index 0
 
+        // Create swap chain
+        let swap_chain = SwapChain::new(&instance, physical_device, &device, &surface, &window)?;
+
         Ok(Self {
             sdl_context,
             window,
@@ -144,6 +151,7 @@ impl HelloTriangleApp {
             physical_device,
             device,
             queue,
+            swap_chain,
         })
     }
 
@@ -211,6 +219,7 @@ impl HelloTriangleApp {
 impl Drop for HelloTriangleApp {
     fn drop(&mut self) {
         unsafe {
+            self.swap_chain.destroy(&self.device);
             self.device.destroy_device(None);
             self.surface.destroy();
             if let Some(mut debug_utils) = self.debug_utils.take() {
@@ -218,57 +227,6 @@ impl Drop for HelloTriangleApp {
             }
             self.instance.destroy_instance(None);
         }
-    }
-}
-
-struct Surface {
-    fns: khr::surface::Instance,
-    handle: vk::SurfaceKHR,
-}
-
-impl Surface {
-    pub fn new(
-        entry: &ash::Entry,
-        instance: &ash::Instance,
-        window: &sdl3::video::Window,
-    ) -> anyhow::Result<Self> {
-        let mut handle = vk::SurfaceKHR::null();
-        unsafe {
-            ensure!(
-                SDL_Vulkan_CreateSurface(window.raw(), instance.handle(), ptr::null(), &mut handle),
-                "SDL_Vulkan_CreateSurface failed"
-            );
-        }
-        let fns = khr::surface::Instance::new(&entry, &instance);
-        Ok(Self { fns, handle })
-    }
-
-    pub fn is_queue_family_suitable(
-        &self,
-        physical_device: vk::PhysicalDevice,
-        queue_family: u32,
-    ) -> bool {
-        unsafe {
-            self.fns
-                .get_physical_device_surface_support(physical_device, queue_family, self.handle)
-                .map_err(|e| {
-                    log::warn!(
-                        "Couldn't get surface support for device={physical_device:?} qf={queue_family}: {e}"
-                    );
-                    e
-                })
-                .unwrap_or(false)
-        }
-    }
-
-    /// # Safety
-    ///
-    /// - Must be called before the `ash::Instance` that was used to create this
-    ///   `Surface` is destroyed.
-    /// - Must be called at most once. Calling it more than once is undefined
-    ///   behaviour as the underlying handle becomes invalid after the first call.
-    pub unsafe fn destroy(&mut self) {
-        unsafe { self.fns.destroy_surface(self.handle, None) };
     }
 }
 
