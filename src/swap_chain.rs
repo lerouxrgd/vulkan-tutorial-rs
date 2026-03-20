@@ -1,8 +1,11 @@
 use anyhow::ensure;
 use ash::{khr, vk};
 
+use crate::devices::{Device, PhysicalDevice};
+use crate::instance::Instance;
 use crate::surface::Surface;
 
+#[non_exhaustive]
 pub struct SwapChain {
     pub fns: khr::swapchain::Device,
     pub handle: vk::SwapchainKHR,
@@ -14,16 +17,16 @@ pub struct SwapChain {
 
 impl SwapChain {
     pub fn new(
-        instance: &ash::Instance,
-        physical_device: vk::PhysicalDevice,
-        device: &ash::Device,
+        instance: &Instance,
+        physical_device: &PhysicalDevice,
+        device: &Device,
         surface: &Surface,
         window: &sdl3::video::Window,
     ) -> anyhow::Result<Self> {
         let surface_capabilities = unsafe {
             surface
                 .fns
-                .get_physical_device_surface_capabilities(physical_device, surface.handle)?
+                .get_physical_device_surface_capabilities(physical_device.handle, surface.handle)?
         };
         let extent = Self::choose_extent(&surface_capabilities, window);
         let min_image_count = Self::choose_min_image_count(&surface_capabilities);
@@ -31,14 +34,14 @@ impl SwapChain {
         let available_formats = unsafe {
             surface
                 .fns
-                .get_physical_device_surface_formats(physical_device, surface.handle)?
+                .get_physical_device_surface_formats(physical_device.handle, surface.handle)?
         };
         let surface_format = Self::choose_surface_format(&available_formats)?;
 
         let available_present_modes = unsafe {
             surface
                 .fns
-                .get_physical_device_surface_present_modes(physical_device, surface.handle)?
+                .get_physical_device_surface_present_modes(physical_device.handle, surface.handle)?
         };
         let present_mode = Self::choose_present_mode(&available_present_modes)?;
 
@@ -56,7 +59,7 @@ impl SwapChain {
             .present_mode(present_mode)
             .clipped(true); // we don’t care about the color of pixels that are obscured
 
-        let fns = khr::swapchain::Device::new(instance, device);
+        let fns = khr::swapchain::Device::new(&instance.handle, &device.handle);
         let handle = unsafe { fns.create_swapchain(&swapchain_ci, None)? };
         let images = unsafe { fns.get_swapchain_images(handle)? };
 
@@ -76,7 +79,7 @@ impl SwapChain {
                             .base_array_layer(0) // without multiple layers
                             .layer_count(1),
                     );
-                unsafe { device.create_image_view(&image_view_ci, None) }
+                unsafe { device.handle.create_image_view(&image_view_ci, None) }
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -153,10 +156,10 @@ impl SwapChain {
     ///   `Swapchain` is destroyed.
     /// - Must be called at most once. Calling it more than once is undefined
     ///   behaviour as the underlying handle becomes invalid after the first call.
-    pub unsafe fn destroy(&mut self, device: &ash::Device) {
+    pub unsafe fn destroy(&mut self, device: &Device) {
         unsafe {
             for &image_view in &self.image_views {
-                device.destroy_image_view(image_view, None);
+                device.handle.destroy_image_view(image_view, None);
             }
             self.fns.destroy_swapchain(self.handle, None)
         };

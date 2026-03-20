@@ -4,25 +4,29 @@ use anyhow::ensure;
 use ash::{khr, vk};
 use sdl3::sys::vulkan::SDL_Vulkan_CreateSurface;
 
+use crate::instance::Instance;
+
+#[non_exhaustive]
 pub struct Surface {
     pub fns: khr::surface::Instance,
     pub handle: vk::SurfaceKHR,
 }
 
 impl Surface {
-    pub fn new(
-        entry: &ash::Entry,
-        instance: &ash::Instance,
-        window: &sdl3::video::Window,
-    ) -> anyhow::Result<Self> {
+    pub fn new(instance: &Instance, window: &sdl3::video::Window) -> anyhow::Result<Self> {
         let mut handle = vk::SurfaceKHR::null();
         unsafe {
             ensure!(
-                SDL_Vulkan_CreateSurface(window.raw(), instance.handle(), ptr::null(), &mut handle),
+                SDL_Vulkan_CreateSurface(
+                    window.raw(),
+                    instance.raw_handle(),
+                    ptr::null(),
+                    &mut handle
+                ),
                 "SDL_Vulkan_CreateSurface failed"
             );
         }
-        let fns = khr::surface::Instance::new(&entry, &instance);
+        let fns = khr::surface::Instance::new(&instance.entry, &instance.handle);
         Ok(Self { fns, handle })
     }
 
