@@ -30,6 +30,8 @@ impl SwapChain {
         };
         let extent = Self::choose_extent(&surface_capabilities, window);
         let min_image_count = Self::choose_min_image_count(&surface_capabilities);
+        log::debug!("Selected extent: {extent:?}");
+        log::debug!("Selected min_image_count: {min_image_count}");
 
         let available_formats = unsafe {
             surface
@@ -37,6 +39,7 @@ impl SwapChain {
                 .get_physical_device_surface_formats(physical_device.handle, surface.handle)?
         };
         let surface_format = Self::choose_surface_format(&available_formats)?;
+        log::debug!("Selected surface format: {surface_format:?}");
 
         let available_present_modes = unsafe {
             surface
@@ -44,6 +47,7 @@ impl SwapChain {
                 .get_physical_device_surface_present_modes(physical_device.handle, surface.handle)?
         };
         let present_mode = Self::choose_present_mode(&available_present_modes)?;
+        log::debug!("Selected present_mode: {present_mode:?}");
 
         let swapchain_ci = vk::SwapchainCreateInfoKHR::default()
             .surface(surface.handle)

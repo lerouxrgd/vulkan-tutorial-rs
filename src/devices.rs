@@ -57,14 +57,17 @@ impl PhysicalDevice {
         }
 
         // Check required features
+        let mut vulkan_1_1_features = vk::PhysicalDeviceVulkan11Features::default();
         let mut vulkan_1_3_features = vk::PhysicalDeviceVulkan13Features::default();
         let mut extended_dynamic_state_features =
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default();
         let mut features = vk::PhysicalDeviceFeatures2::default()
+            .push_next(&mut vulkan_1_1_features)
             .push_next(&mut vulkan_1_3_features)
             .push_next(&mut extended_dynamic_state_features);
         unsafe { instance.get_physical_device_features2(physical_device, &mut features) };
-        let supports_all_features = vulkan_1_3_features.dynamic_rendering == vk::TRUE
+        let supports_all_features = vulkan_1_1_features.shader_draw_parameters == vk::TRUE
+            && vulkan_1_3_features.dynamic_rendering == vk::TRUE
             && extended_dynamic_state_features.extended_dynamic_state == vk::TRUE;
         if !supports_all_features {
             return None;
@@ -119,12 +122,15 @@ impl Device {
             .map(|e| e.as_ptr())
             .collect();
 
+        let mut vulkan_1_1_features =
+            vk::PhysicalDeviceVulkan11Features::default().shader_draw_parameters(true);
         let mut vulkan_1_3_features =
             vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true);
         let mut extended_dynamic_state_features =
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default()
                 .extended_dynamic_state(true);
         let mut features = vk::PhysicalDeviceFeatures2::default()
+            .push_next(&mut vulkan_1_1_features)
             .push_next(&mut vulkan_1_3_features)
             .push_next(&mut extended_dynamic_state_features);
 

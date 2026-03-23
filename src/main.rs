@@ -1,8 +1,11 @@
 mod devices;
 mod instance;
 mod logging;
+mod pipeline;
 mod surface;
 mod swap_chain;
+
+use pipeline::GraphicsPipeline;
 
 use crate::devices::{Device, PhysicalDevice};
 use crate::instance::Instance;
@@ -17,11 +20,12 @@ struct HelloTriangleApp {
     physical_device: PhysicalDevice,
     device: Device,
     swap_chain: SwapChain,
+    pipeline: GraphicsPipeline,
 }
 
 impl HelloTriangleApp {
-    const WIDTH: u32 = 1080;
-    const HEIGHT: u32 = 1080;
+    const WIDTH: u32 = 800;
+    const HEIGHT: u32 = 600;
 
     pub fn new() -> anyhow::Result<Self> {
         let sdl_context = sdl3::init()?;
@@ -36,6 +40,8 @@ impl HelloTriangleApp {
         let physical_device = PhysicalDevice::new(&instance, &surface)?;
         let device = Device::new(&instance, &physical_device)?;
         let swap_chain = SwapChain::new(&instance, &physical_device, &device, &surface, &window)?;
+        let pipeline =
+            GraphicsPipeline::new(&device, &swap_chain, concat!(env!("OUT_DIR"), "/slang.spv"))?;
 
         log::info!("Selected device: {}", physical_device.name(&instance)?);
 
@@ -47,6 +53,7 @@ impl HelloTriangleApp {
             physical_device,
             device,
             swap_chain,
+            pipeline,
         })
     }
 
@@ -72,6 +79,7 @@ impl HelloTriangleApp {
 impl Drop for HelloTriangleApp {
     fn drop(&mut self) {
         unsafe {
+            self.pipeline.destroy(&self.device);
             self.swap_chain.destroy(&self.device);
             self.device.destroy();
             self.surface.destroy();
