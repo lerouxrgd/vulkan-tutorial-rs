@@ -1,0 +1,176 @@
+use std::slice;
+
+use ash::vk;
+
+use crate::devices::{Device, PhysicalDevice};
+use crate::pipeline::GraphicsPipeline;
+use crate::swap_chain::SwapChain;
+
+#[non_exhaustive]
+pub struct Commands {
+    pub pool: vk::CommandPool,
+    pub buffer: vk::CommandBuffer,
+}
+
+impl Commands {
+    pub fn new(device: &Device, physical_device: &PhysicalDevice) -> anyhow::Result<Self> {
+        // Create command pool
+        let pool_ci = vk::CommandPoolCreateInfo::default()
+            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+            .queue_family_index(physical_device.queue_family);
+        let pool = unsafe { device.handle.create_command_pool(&pool_ci, None)? };
+
+        // Allocate command buffer
+        let alloc_info = vk::CommandBufferAllocateInfo::default()
+            .command_pool(pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(1);
+        let buffer = unsafe { device.handle.allocate_command_buffers(&alloc_info)?[0] };
+
+        Ok(Self { pool, buffer })
+    }
+
+    pub fn record(
+        &mut self,
+        device: &Device,
+        swap_chain: &SwapChain,
+        pipeline: &GraphicsPipeline,
+        image_index: usize,
+    ) -> anyhow::Result<()> {
+        let device = &device.handle;
+
+        let begin_info = vk::CommandBufferBeginInfo::default();
+        unsafe { device.begin_command_buffer(self.buffer, &begin_info)? };
+
+        // Transition swapchain image to color attachment optimal for rendering
+        Self::transition_image_layout(
+            &device,
+            self.buffer,
+            swap_chain.images[image_index],
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::AccessFlags2::empty(), // srcAccessMask (no need to wait for previous operations)
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE, // dstAccessMask
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, // srcStage
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, // dstStage
+        );
+
+        let attachment_info = vk::RenderingAttachmentInfo::default()
+            .image_view(swap_chain.image_views[image_index])
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            });
+
+        let rendering_info = vk::RenderingInfo::default()
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: swap_chain.extent,
+            })
+            .layer_count(1)
+            .color_attachments(slice::from_ref(&attachment_info));
+
+        unsafe {
+            device.cmd_begin_rendering(self.buffer, &rendering_info);
+            device.cmd_bind_pipeline(
+                self.buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipeline.handle,
+            );
+            device.cmd_set_viewport(
+                self.buffer,
+                0,
+                &[vk::Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: swap_chain.extent.width as f32,
+                    height: swap_chain.extent.height as f32,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                }],
+            );
+            device.cmd_set_scissor(
+                self.buffer,
+                0,
+                &[vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: swap_chain.extent,
+                }],
+            );
+            device.cmd_draw(self.buffer, 3, 1, 0, 0);
+            device.cmd_end_rendering(self.buffer);
+        }
+
+        // Transition swapchain image to present layout
+        Self::transition_image_layout(
+            device,
+            self.buffer,
+            swap_chain.images[image_index],
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::ImageLayout::PRESENT_SRC_KHR,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::AccessFlags2::empty(),
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+        );
+
+        unsafe { device.end_command_buffer(self.buffer)? };
+
+        Ok(())
+    }
+
+    fn transition_image_layout(
+        device: &ash::Device,
+        command_buffer: vk::CommandBuffer,
+        image: vk::Image,
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+        src_access_mask: vk::AccessFlags2,
+        dst_access_mask: vk::AccessFlags2,
+        src_stage_mask: vk::PipelineStageFlags2,
+        dst_stage_mask: vk::PipelineStageFlags2,
+    ) {
+        let barrier = vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(src_stage_mask)
+            .src_access_mask(src_access_mask)
+            .dst_stage_mask(dst_stage_mask)
+            .dst_access_mask(dst_access_mask)
+            .old_layout(old_layout)
+            .new_layout(new_layout)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(image)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_mip_level(0)
+                    .level_count(1)
+                    .base_array_layer(0)
+                    .layer_count(1),
+            );
+
+        let dependency_info =
+            vk::DependencyInfo::default().image_memory_barriers(slice::from_ref(&barrier));
+
+        unsafe { device.cmd_pipeline_barrier2(command_buffer, &dependency_info) };
+    }
+
+    /// # Safety
+    ///
+    /// - Must be called before the `ash::Device` that was used to create this
+    ///   `Commands` is destroyed.
+    /// - The command buffer must not be in a pending state (i.e. not currently
+    ///   being executed by the GPU).
+    /// - Must be called at most once. Calling it more than once is undefined
+    ///   behaviour as the underlying handles become invalid after the first call.
+    pub unsafe fn destroy(&mut self, device: &Device) {
+        unsafe {
+            // Freeing the pool implicitly frees all command buffers allocated from it
+            device.handle.destroy_command_pool(self.pool, None);
+        }
+    }
+}

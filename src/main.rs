@@ -1,3 +1,4 @@
+mod commands;
 mod devices;
 mod instance;
 mod logging;
@@ -5,10 +6,10 @@ mod pipeline;
 mod surface;
 mod swap_chain;
 
-use pipeline::GraphicsPipeline;
-
+use crate::commands::Commands;
 use crate::devices::{Device, PhysicalDevice};
 use crate::instance::Instance;
+use crate::pipeline::GraphicsPipeline;
 use crate::surface::Surface;
 use crate::swap_chain::SwapChain;
 
@@ -21,6 +22,7 @@ struct HelloTriangleApp {
     device: Device,
     swap_chain: SwapChain,
     pipeline: GraphicsPipeline,
+    commands: Commands,
 }
 
 impl HelloTriangleApp {
@@ -42,6 +44,7 @@ impl HelloTriangleApp {
         let swap_chain = SwapChain::new(&instance, &physical_device, &device, &surface, &window)?;
         let pipeline =
             GraphicsPipeline::new(&device, &swap_chain, concat!(env!("OUT_DIR"), "/slang.spv"))?;
+        let commands = Commands::new(&device, &physical_device)?;
 
         log::info!("Selected device: {}", physical_device.name(&instance)?);
 
@@ -54,6 +57,7 @@ impl HelloTriangleApp {
             device,
             swap_chain,
             pipeline,
+            commands,
         })
     }
 
@@ -79,6 +83,7 @@ impl HelloTriangleApp {
 impl Drop for HelloTriangleApp {
     fn drop(&mut self) {
         unsafe {
+            self.commands.destroy(&self.device);
             self.pipeline.destroy(&self.device);
             self.swap_chain.destroy(&self.device);
             self.device.destroy();
