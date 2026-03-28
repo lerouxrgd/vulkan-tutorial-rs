@@ -43,13 +43,28 @@ impl Commands {
         unsafe { device.begin_command_buffer(self.buffer, &begin_info)? };
 
         // Transition swapchain image to color attachment optimal for rendering
+        //
+        // src_stage:  COLOR_ATTACHMENT_OUTPUT  (wait until this stage is done...)
+        // src_access: empty                    (...with no prior writes to make visible)
+        // dst_stage:  COLOR_ATTACHMENT_OUTPUT  (before this stage starts...)
+        // dst_access: COLOR_ATTACHMENT_WRITE   (...writing color output)
+        //
+        // The barrier acts as a dividing line within the stage:
+        // - Wait for any COLOR_ATTACHMENT_OUTPUT work that was submitted before this barrier
+        // - Then do the transition
+        // - Then allow COLOR_ATTACHMENT_OUTPUT work submitted after this barrier to proceed
+        //
+        // In this case there is no prior COLOR_ATTACHMENT_OUTPUT work at all — this is
+        // the very start of the frame. So the src side resolves instantly (nothing to
+        // wait for), the transition happens, and then the actual color writes are
+        // unblocked.
         Self::transition_image_layout(
             &device,
             self.buffer,
             swap_chain.images[image_index],
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            vk::AccessFlags2::empty(), // srcAccessMask (no need to wait for previous operations)
+            vk::AccessFlags2::empty(),                // srcAccessMask
             vk::AccessFlags2::COLOR_ATTACHMENT_WRITE, // dstAccessMask
             vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, // srcStage
             vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, // dstStage
@@ -106,6 +121,11 @@ impl Commands {
         }
 
         // Transition swapchain image to present layout
+        //
+        // src_stage:  COLOR_ATTACHMENT_OUTPUT  (wait until color writes are done...)
+        // src_access: COLOR_ATTACHMENT_WRITE   (...and make those writes visible)
+        // dst_stage:  BOTTOM_OF_PIPE           (before the end of the pipeline...)
+        // dst_access: empty                    (...no GPU reads needed, presentation engine handles it)
         Self::transition_image_layout(
             device,
             self.buffer,
@@ -123,6 +143,8 @@ impl Commands {
         Ok(())
     }
 
+    /// Perform image layout transitions which tell the GPU how the image data is
+    /// physically arranged in memory.
     fn transition_image_layout(
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,
@@ -134,6 +156,9 @@ impl Commands {
         src_stage_mask: vk::PipelineStageFlags2,
         dst_stage_mask: vk::PipelineStageFlags2,
     ) {
+        // Memory barriers (ImageMemoryBarrier2) synchronize within a single queue,
+        // controlling both execution order and memory visibility between pipeline
+        // stages.
         let barrier = vk::ImageMemoryBarrier2::default()
             .src_stage_mask(src_stage_mask)
             .src_access_mask(src_access_mask)
