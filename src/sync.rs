@@ -1,29 +1,43 @@
 use ash::vk;
 
 use crate::devices::Device;
+use crate::swap_chain::SwapChain;
 
 #[non_exhaustive]
 pub struct SyncObjects {
-    pub present_complete_semaphore: vk::Semaphore,
-    pub render_finished_semaphore: vk::Semaphore,
-    pub draw_fence: vk::Fence,
+    pub present_complete_semaphores: Vec<vk::Semaphore>,
+    pub render_finished_semaphores: Vec<vk::Semaphore>,
+    pub inflight_fences: Vec<vk::Fence>,
 }
 
 impl SyncObjects {
-    pub fn new(device: &Device) -> anyhow::Result<Self> {
+    pub fn new(
+        device: &Device,
+        swap_chain: &SwapChain,
+        max_frames_inflight: usize,
+    ) -> anyhow::Result<Self> {
         let device_h = &device.handle;
 
         let semaphore_ci = vk::SemaphoreCreateInfo::default();
-        let present_complete_semaphore = unsafe { device_h.create_semaphore(&semaphore_ci, None)? };
-        let render_finished_semaphore = unsafe { device_h.create_semaphore(&semaphore_ci, None)? };
+        let render_finished_semaphores =
+            (0..swap_chain.images.len()) // indexed by swapchain image
+                .map(|_| unsafe { device_h.create_semaphore(&semaphore_ci, None) })
+                .collect::<Result<Vec<_>, _>>()?;
+        let present_complete_semaphores =
+            (0..max_frames_inflight) // indexed by frame slot
+                .map(|_| unsafe { device_h.create_semaphore(&semaphore_ci, None) })
+                .collect::<Result<Vec<_>, _>>()?;
 
         let fence_ci = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
-        let draw_fence = unsafe { device_h.create_fence(&fence_ci, None)? };
+        let inflight_fences =
+            (0..max_frames_inflight) // indexed by frame slot
+                .map(|_| unsafe { device_h.create_fence(&fence_ci, None) })
+                .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
-            present_complete_semaphore,
-            render_finished_semaphore,
-            draw_fence,
+            present_complete_semaphores,
+            render_finished_semaphores,
+            inflight_fences,
         })
     }
 
@@ -38,9 +52,15 @@ impl SyncObjects {
     pub unsafe fn destroy(&mut self, device: &Device) {
         let device_h = &device.handle;
         unsafe {
-            device_h.destroy_semaphore(self.present_complete_semaphore, None);
-            device_h.destroy_semaphore(self.render_finished_semaphore, None);
-            device_h.destroy_fence(self.draw_fence, None);
+            self.present_complete_semaphores
+                .iter()
+                .for_each(|&s| device_h.destroy_semaphore(s, None));
+            self.render_finished_semaphores
+                .iter()
+                .for_each(|&s| device_h.destroy_semaphore(s, None));
+            self.inflight_fences
+                .iter()
+                .for_each(|&f| device_h.destroy_fence(f, None));
         }
     }
 }

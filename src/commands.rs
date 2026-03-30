@@ -9,11 +9,15 @@ use crate::swap_chain::SwapChain;
 #[non_exhaustive]
 pub struct Commands {
     pub pool: vk::CommandPool,
-    pub buffer: vk::CommandBuffer,
+    pub buffers: Vec<vk::CommandBuffer>,
 }
 
 impl Commands {
-    pub fn new(device: &Device, physical_device: &PhysicalDevice) -> anyhow::Result<Self> {
+    pub fn new(
+        device: &Device,
+        physical_device: &PhysicalDevice,
+        max_frames_inflight: usize,
+    ) -> anyhow::Result<Self> {
         // Create command pool
         let pool_ci = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
@@ -24,10 +28,10 @@ impl Commands {
         let alloc_info = vk::CommandBufferAllocateInfo::default()
             .command_pool(pool)
             .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
-        let buffer = unsafe { device.handle.allocate_command_buffers(&alloc_info)?[0] };
+            .command_buffer_count(max_frames_inflight as u32);
+        let buffers = unsafe { device.handle.allocate_command_buffers(&alloc_info)? };
 
-        Ok(Self { pool, buffer })
+        Ok(Self { pool, buffers })
     }
 
     pub fn record(
@@ -36,11 +40,13 @@ impl Commands {
         swap_chain: &SwapChain,
         pipeline: &GraphicsPipeline,
         image_index: usize,
+        frame_index: usize,
     ) -> anyhow::Result<()> {
         let device = &device.handle;
+        let buffer = self.buffers[frame_index];
 
         let begin_info = vk::CommandBufferBeginInfo::default();
-        unsafe { device.begin_command_buffer(self.buffer, &begin_info)? };
+        unsafe { device.begin_command_buffer(buffer, &begin_info)? };
 
         // Transition swapchain image to color attachment optimal for rendering
         //
@@ -60,7 +66,7 @@ impl Commands {
         // unblocked.
         Self::transition_image_layout(
             &device,
-            self.buffer,
+            buffer,
             swap_chain.images[image_index],
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -90,14 +96,10 @@ impl Commands {
             .color_attachments(slice::from_ref(&attachment_info));
 
         unsafe {
-            device.cmd_begin_rendering(self.buffer, &rendering_info);
-            device.cmd_bind_pipeline(
-                self.buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipeline.handle,
-            );
+            device.cmd_begin_rendering(buffer, &rendering_info);
+            device.cmd_bind_pipeline(buffer, vk::PipelineBindPoint::GRAPHICS, pipeline.handle);
             device.cmd_set_viewport(
-                self.buffer,
+                buffer,
                 0,
                 &[vk::Viewport {
                     x: 0.0,
@@ -109,15 +111,15 @@ impl Commands {
                 }],
             );
             device.cmd_set_scissor(
-                self.buffer,
+                buffer,
                 0,
                 &[vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
                     extent: swap_chain.extent,
                 }],
             );
-            device.cmd_draw(self.buffer, 3, 1, 0, 0);
-            device.cmd_end_rendering(self.buffer);
+            device.cmd_draw(buffer, 3, 1, 0, 0);
+            device.cmd_end_rendering(buffer);
         }
 
         // Transition swapchain image to present layout
@@ -128,7 +130,7 @@ impl Commands {
         // dst_access: empty                    (...no GPU reads needed, presentation engine handles it)
         Self::transition_image_layout(
             device,
-            self.buffer,
+            buffer,
             swap_chain.images[image_index],
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             vk::ImageLayout::PRESENT_SRC_KHR,
@@ -138,7 +140,7 @@ impl Commands {
             vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
         );
 
-        unsafe { device.end_command_buffer(self.buffer)? };
+        unsafe { device.end_command_buffer(buffer)? };
 
         Ok(())
     }

@@ -31,11 +31,13 @@ struct HelloTriangleApp {
     pipeline: GraphicsPipeline,
     commands: Commands,
     sync: SyncObjects,
+    frame_index: usize,
 }
 
 impl HelloTriangleApp {
     const WIDTH: u32 = 800;
     const HEIGHT: u32 = 600;
+    const MAX_FRAMES_INFLIGHT: usize = 2;
 
     pub fn new() -> anyhow::Result<Self> {
         let sdl_context = sdl3::init()?;
@@ -52,8 +54,8 @@ impl HelloTriangleApp {
         let swap_chain = SwapChain::new(&instance, &physical_device, &device, &surface, &window)?;
         let pipeline =
             GraphicsPipeline::new(&device, &swap_chain, concat!(env!("OUT_DIR"), "/slang.spv"))?;
-        let commands = Commands::new(&device, &physical_device)?;
-        let sync = SyncObjects::new(&device)?;
+        let commands = Commands::new(&device, &physical_device, Self::MAX_FRAMES_INFLIGHT)?;
+        let sync = SyncObjects::new(&device, &swap_chain, Self::MAX_FRAMES_INFLIGHT)?;
 
         log::info!("Selected device: {}", physical_device.name(&instance)?);
 
@@ -68,16 +70,20 @@ impl HelloTriangleApp {
             pipeline,
             commands,
             sync,
+            frame_index: 0,
         })
     }
 
     fn draw(&mut self) -> anyhow::Result<()> {
         let device_h = &self.device.handle;
+        let inflight_fence = self.sync.inflight_fences[self.frame_index];
+        let present_complete_semaphore = self.sync.present_complete_semaphores[self.frame_index];
+        let command_buffer = self.commands.buffers[self.frame_index];
 
         // Wait for the previous frame to finish
         unsafe {
-            device_h.wait_for_fences(slice::from_ref(&self.sync.draw_fence), true, u64::MAX)?;
-            device_h.reset_fences(slice::from_ref(&self.sync.draw_fence))?;
+            device_h.wait_for_fences(slice::from_ref(&inflight_fence), true, u64::MAX)?;
+            device_h.reset_fences(slice::from_ref(&inflight_fence))?;
         }
 
         // Acquire next swapchain image
@@ -85,10 +91,11 @@ impl HelloTriangleApp {
             self.swap_chain.fns.acquire_next_image(
                 self.swap_chain.handle,
                 u64::MAX,
-                self.sync.present_complete_semaphore,
+                present_complete_semaphore,
                 vk::Fence::null(),
             )?
         };
+        let render_finished_semaphore = self.sync.render_finished_semaphores[image_index as usize];
 
         // Record commands for this frame
         self.commands.record(
@@ -96,29 +103,27 @@ impl HelloTriangleApp {
             &self.swap_chain,
             &self.pipeline,
             image_index as usize,
+            self.frame_index,
         )?;
-
-        // NOTE: for simplicity, wait for the queue to be idle before submitting
-        unsafe { device_h.queue_wait_idle(self.device.queue)? };
 
         // Submit command buffer
         let wait_dst_stage_mask = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT; // will be gated by semaphore
         let submit_info = vk::SubmitInfo::default()
-            .wait_semaphores(slice::from_ref(&self.sync.present_complete_semaphore))
+            .wait_semaphores(slice::from_ref(&present_complete_semaphore))
             .wait_dst_stage_mask(slice::from_ref(&wait_dst_stage_mask))
-            .command_buffers(slice::from_ref(&self.commands.buffer))
-            .signal_semaphores(slice::from_ref(&self.sync.render_finished_semaphore));
+            .command_buffers(slice::from_ref(&command_buffer))
+            .signal_semaphores(slice::from_ref(&render_finished_semaphore));
         unsafe {
             device_h.queue_submit(
                 self.device.queue,
                 slice::from_ref(&submit_info),
-                self.sync.draw_fence,
+                inflight_fence,
             )?
         };
 
         // Present
         let present_info = vk::PresentInfoKHR::default()
-            .wait_semaphores(slice::from_ref(&self.sync.render_finished_semaphore))
+            .wait_semaphores(slice::from_ref(&render_finished_semaphore))
             .swapchains(slice::from_ref(&self.swap_chain.handle))
             .image_indices(slice::from_ref(&image_index));
         let result = unsafe {
@@ -149,6 +154,7 @@ impl HelloTriangleApp {
                     _ => {}
                 }
             }
+            self.frame_index = (self.frame_index + 1) % Self::MAX_FRAMES_INFLIGHT;
         }
         unsafe { self.device.handle.device_wait_idle()? }; // finish device operations before destroying resources
         Ok(())
