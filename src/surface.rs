@@ -38,11 +38,11 @@ impl Surface {
         unsafe {
             self.fns
                 .get_physical_device_surface_support(physical_device, queue_family, self.handle)
-                .map_err(|e| {
+                .inspect_err(|&e| {
                     log::warn!(
                         "Couldn't get surface support for device={physical_device:?} qf={queue_family}: {e}"
                     );
-                    e
+
                 })
                 .unwrap_or(false)
         }

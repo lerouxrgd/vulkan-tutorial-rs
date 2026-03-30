@@ -2,6 +2,7 @@ use std::ffi::CStr;
 use std::slice;
 
 use anyhow::anyhow;
+use ash::prelude::VkResult;
 use ash::{khr, vk};
 
 use crate::instance::Instance;
@@ -112,7 +113,7 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(instance: &Instance, physical_device: &PhysicalDevice) -> anyhow::Result<Self> {
+    pub fn new(instance: &Instance, physical_device: &PhysicalDevice) -> VkResult<Self> {
         let queue_priorities = [0.5]; // implies queue_count == 1
         let queue_ci = vk::DeviceQueueCreateInfo::default()
             .queue_family_index(physical_device.queue_family)

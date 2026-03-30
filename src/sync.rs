@@ -1,3 +1,4 @@
+use ash::prelude::VkResult;
 use ash::vk;
 
 use crate::devices::Device;
@@ -15,7 +16,7 @@ impl SyncObjects {
         device: &Device,
         swap_chain: &SwapChain,
         max_frames_inflight: usize,
-    ) -> anyhow::Result<Self> {
+    ) -> VkResult<Self> {
         let device_h = &device.handle;
 
         let semaphore_ci = vk::SemaphoreCreateInfo::default();

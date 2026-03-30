@@ -1,6 +1,7 @@
 use std::ffi::{CStr, c_void};
 
 use ash::ext::debug_utils;
+use ash::prelude::VkResult;
 use ash::vk;
 
 pub struct DebugUtils {
@@ -9,7 +10,7 @@ pub struct DebugUtils {
 }
 
 impl DebugUtils {
-    pub fn new(entry: &ash::Entry, instance: &ash::Instance) -> anyhow::Result<Self> {
+    pub fn new(entry: &ash::Entry, instance: &ash::Instance) -> VkResult<Self> {
         let fns = debug_utils::Instance::new(entry, instance);
         let ci = DebugUtils::messenger_ci();
         let handle = unsafe { fns.create_debug_utils_messenger(&ci, None)? };

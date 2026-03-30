@@ -1,5 +1,6 @@
 use std::slice;
 
+use ash::prelude::VkResult;
 use ash::vk;
 
 use crate::devices::{Device, PhysicalDevice};
@@ -17,7 +18,7 @@ impl Commands {
         device: &Device,
         physical_device: &PhysicalDevice,
         max_frames_inflight: usize,
-    ) -> anyhow::Result<Self> {
+    ) -> VkResult<Self> {
         // Create command pool
         let pool_ci = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
@@ -41,7 +42,7 @@ impl Commands {
         pipeline: &GraphicsPipeline,
         image_index: usize,
         frame_index: usize,
-    ) -> anyhow::Result<()> {
+    ) -> VkResult<()> {
         let device = &device.handle;
         let buffer = self.buffers[frame_index];
 
@@ -65,7 +66,7 @@ impl Commands {
         // wait for), the transition happens, and then the actual color writes are
         // unblocked.
         Self::transition_image_layout(
-            &device,
+            device,
             buffer,
             swap_chain.images[image_index],
             vk::ImageLayout::UNDEFINED,
@@ -147,6 +148,7 @@ impl Commands {
 
     /// Perform image layout transitions which tell the GPU how the image data is
     /// physically arranged in memory.
+    #[allow(clippy::too_many_arguments)]
     fn transition_image_layout(
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,

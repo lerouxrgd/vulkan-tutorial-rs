@@ -156,8 +156,26 @@ impl SwapChain {
 
     /// # Safety
     ///
-    /// - Must be called before the `ash::Device` that was used to create this
-    ///   `Swapchain` is destroyed.
+    /// - Must be called using the same objects that were used to create this `Swapchain`.
+    pub unsafe fn recreate(
+        &mut self,
+        instance: &Instance,
+        physical_device: &PhysicalDevice,
+        device: &Device,
+        surface: &Surface,
+        window: &sdl3::video::Window,
+    ) -> anyhow::Result<()> {
+        unsafe {
+            device.handle.device_wait_idle()?;
+            self.destroy(device)
+        };
+        *self = Self::new(instance, physical_device, device, surface, window)?;
+        Ok(())
+    }
+
+    /// # Safety
+    ///
+    /// - Must be called using the `ash::Device` that was used to create this `Swapchain`.
     /// - Must be called at most once. Calling it more than once is undefined
     ///   behaviour as the underlying handle becomes invalid after the first call.
     pub unsafe fn destroy(&mut self, device: &Device) {

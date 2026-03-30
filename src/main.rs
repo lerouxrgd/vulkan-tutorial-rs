@@ -23,6 +23,7 @@ use crate::sync::SyncObjects;
 struct HelloTriangleApp {
     sdl_context: sdl3::Sdl,
     window: sdl3::video::Window,
+    minimized: bool,
     instance: Instance,
     surface: Surface,
     physical_device: PhysicalDevice,
@@ -45,6 +46,7 @@ impl HelloTriangleApp {
         let window = video
             .window("Hello Triangle", Self::WIDTH, Self::HEIGHT)
             .vulkan()
+            .resizable()
             .build()?;
 
         let instance = Instance::new(&window)?;
@@ -62,6 +64,7 @@ impl HelloTriangleApp {
         Ok(Self {
             sdl_context,
             window,
+            minimized: false,
             instance,
             surface,
             physical_device,
@@ -74,27 +77,46 @@ impl HelloTriangleApp {
         })
     }
 
-    fn draw(&mut self) -> anyhow::Result<()> {
+    fn draw_frame(&mut self) -> anyhow::Result<()> {
         let device_h = &self.device.handle;
         let inflight_fence = self.sync.inflight_fences[self.frame_index];
         let present_complete_semaphore = self.sync.present_complete_semaphores[self.frame_index];
         let command_buffer = self.commands.buffers[self.frame_index];
 
         // Wait for the previous frame to finish
-        unsafe {
-            device_h.wait_for_fences(slice::from_ref(&inflight_fence), true, u64::MAX)?;
-            device_h.reset_fences(slice::from_ref(&inflight_fence))?;
-        }
+        unsafe { device_h.wait_for_fences(slice::from_ref(&inflight_fence), true, u64::MAX)? }
 
         // Acquire next swapchain image
-        let (image_index, _suboptimal) = unsafe {
+        let next_image = unsafe {
             self.swap_chain.fns.acquire_next_image(
                 self.swap_chain.handle,
                 u64::MAX,
                 present_complete_semaphore,
                 vk::Fence::null(),
-            )?
+            )
         };
+        let image_index = match next_image {
+            Ok((image_index, suboptimal)) => {
+                if suboptimal {
+                    log::warn!("acquire_next_image returned suboptimal");
+                }
+                image_index
+            }
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                unsafe {
+                    self.swap_chain.recreate(
+                        &self.instance,
+                        &self.physical_device,
+                        &self.device,
+                        &self.surface,
+                        &self.window,
+                    )?
+                };
+                return Ok(());
+            }
+            Err(e) => bail!("Failed to acquire acquire_next_image: {e}"),
+        };
+        unsafe { device_h.reset_fences(slice::from_ref(&inflight_fence))? } // reset after acquiring next image
         let render_finished_semaphore = self.sync.render_finished_semaphores[image_index as usize];
 
         // Record commands for this frame
@@ -121,42 +143,117 @@ impl HelloTriangleApp {
             )?
         };
 
-        // Present
+        // Present image
         let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(slice::from_ref(&render_finished_semaphore))
             .swapchains(slice::from_ref(&self.swap_chain.handle))
             .image_indices(slice::from_ref(&image_index));
-        let result = unsafe {
+        let presentation = unsafe {
             self.swap_chain
                 .fns
                 .queue_present(self.device.queue, &present_info)
         };
-        match result {
+        match presentation {
             Ok(false) => {}
             Ok(true) => log::warn!("queue_present returned suboptimal"),
-            Err(e) => bail!("queue_present failed: {e}"),
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                unsafe {
+                    self.swap_chain.recreate(
+                        &self.instance,
+                        &self.physical_device,
+                        &self.device,
+                        &self.surface,
+                        &self.window,
+                    )?
+                };
+            }
+            Err(e) => bail!(e),
         }
 
+        self.frame_index = (self.frame_index + 1) % Self::MAX_FRAMES_INFLIGHT;
         Ok(())
+    }
+
+    fn handle_event(&mut self, event: sdl3::event::Event) -> anyhow::Result<bool> {
+        const WINDOW_OCCLUDED: u32 = sdl3::sys::events::SDL_EVENT_WINDOW_OCCLUDED.0;
+
+        match event {
+            // Quit
+            sdl3::event::Event::Quit { .. } => {
+                return Ok(true);
+            }
+
+            // Handle window minimization/restoration
+            sdl3::event::Event::Window {
+                win_event: sdl3::event::WindowEvent::Minimized,
+                ..
+            }
+            | sdl3::event::Event::Unknown {
+                // FIXME: Replace with sdl3::event::WindowEvent::Occluded when it exists
+                type_: WINDOW_OCCLUDED,
+                ..
+            } => {
+                log::debug!("Window minimized/occluded");
+                self.minimized = true;
+            }
+            sdl3::event::Event::Window {
+                win_event: sdl3::event::WindowEvent::Restored | sdl3::event::WindowEvent::Exposed,
+                ..
+            } => {
+                log::debug!("Window restored/exposed");
+                self.minimized = false;
+            }
+
+            // Handle window resizing
+            sdl3::event::Event::Window {
+                win_event: sdl3::event::WindowEvent::Resized(..),
+                ..
+            } => {
+                unsafe {
+                    self.swap_chain.recreate(
+                        &self.instance,
+                        &self.physical_device,
+                        &self.device,
+                        &self.surface,
+                        &self.window,
+                    )?
+                };
+            }
+
+            _ => {}
+        }
+
+        Ok(false)
     }
 
     pub fn run(mut self) -> anyhow::Result<()> {
         let mut event_pump = self.sdl_context.event_pump()?;
-        let mut quit = false;
-        while !quit {
-            self.draw()?;
-            for event in event_pump.poll_iter() {
-                match event {
-                    sdl3::event::Event::Quit { .. } => {
-                        quit = true;
-                        break;
-                    }
-                    _ => {}
+
+        'running: loop {
+            // When minimized, block until an event arrives
+            let first_event = if self.minimized {
+                Some(event_pump.wait_event())
+            } else {
+                None
+            };
+
+            // Process SDL3 events
+            for event in first_event.into_iter().chain(event_pump.poll_iter()) {
+                let done = self.handle_event(event)?;
+                if done {
+                    break 'running;
                 }
             }
-            self.frame_index = (self.frame_index + 1) % Self::MAX_FRAMES_INFLIGHT;
+
+            // Draw frame if the app is not minimized
+            if !self.minimized {
+                self.draw_frame()?;
+            }
         }
-        unsafe { self.device.handle.device_wait_idle()? }; // finish device operations before destroying resources
+
+        // Finish device operations before destroying resources (through Drop impl)
+        unsafe { self.device.handle.device_wait_idle()? };
+
         Ok(())
     }
 }
