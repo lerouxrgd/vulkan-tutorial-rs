@@ -1,3 +1,4 @@
+mod buffers;
 mod commands;
 mod devices;
 mod instance;
@@ -12,6 +13,7 @@ use std::slice;
 use anyhow::bail;
 use ash::vk;
 
+use crate::buffers::VertexBuffer;
 use crate::commands::Commands;
 use crate::devices::{Device, PhysicalDevice};
 use crate::instance::Instance;
@@ -32,6 +34,7 @@ struct HelloTriangleApp {
     pipeline: GraphicsPipeline,
     commands: Commands,
     sync: SyncObjects,
+    vertex_buffer: VertexBuffer,
     frame_index: usize,
 }
 
@@ -58,6 +61,7 @@ impl HelloTriangleApp {
             GraphicsPipeline::new(&device, &swap_chain, concat!(env!("OUT_DIR"), "/slang.spv"))?;
         let commands = Commands::new(&device, &physical_device, Self::MAX_FRAMES_INFLIGHT)?;
         let sync = SyncObjects::new(&device, &swap_chain, Self::MAX_FRAMES_INFLIGHT)?;
+        let vertex_buffer = VertexBuffer::new(&instance, &physical_device, &device)?;
 
         log::info!("Selected device: {}", physical_device.name(&instance)?);
 
@@ -73,6 +77,7 @@ impl HelloTriangleApp {
             pipeline,
             commands,
             sync,
+            vertex_buffer,
             frame_index: 0,
         })
     }
@@ -124,6 +129,7 @@ impl HelloTriangleApp {
             &self.device,
             &self.swap_chain,
             &self.pipeline,
+            &self.vertex_buffer,
             image_index as usize,
             self.frame_index,
         )?;
@@ -261,6 +267,7 @@ impl HelloTriangleApp {
 impl Drop for HelloTriangleApp {
     fn drop(&mut self) {
         unsafe {
+            self.vertex_buffer.destroy(&self.device);
             self.sync.destroy(&self.device);
             self.commands.destroy(&self.device);
             self.pipeline.destroy(&self.device);

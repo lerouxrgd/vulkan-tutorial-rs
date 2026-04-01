@@ -6,7 +6,8 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 ash = "0.38"
-bytemuck = "1"
+bytemuck = { version = "1", features = ["derive"] }
 env_logger = "0.11"
+glam = { version = "0.32", features = ["bytemuck"] }
 log = "0.4"
 sdl3 = { version = "0.17", features = ["ash"] }

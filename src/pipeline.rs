@@ -6,6 +6,7 @@ use std::slice;
 use anyhow::{anyhow, ensure};
 use ash::vk;
 
+use crate::buffers::Vertex;
 use crate::devices::Device;
 use crate::swap_chain::SwapChain;
 
@@ -74,7 +75,11 @@ impl GraphicsPipeline {
                 .name(c"fragMain"),
         ];
 
-        let vertex_input = vk::PipelineVertexInputStateCreateInfo::default();
+        let vertex_attribute_description = Vertex::attribute_descriptions();
+        let vertex_binding_description = Vertex::binding_description();
+        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
+            .vertex_binding_descriptions(slice::from_ref(&vertex_binding_description))
+            .vertex_attribute_descriptions(&vertex_attribute_description);
 
         let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
@@ -126,7 +131,7 @@ impl GraphicsPipeline {
 
         let pipeline_ci = vk::GraphicsPipelineCreateInfo::default()
             .stages(&shader_stages)
-            .vertex_input_state(&vertex_input)
+            .vertex_input_state(&vertex_input_state)
             .input_assembly_state(&input_assembly)
             .viewport_state(&viewport_state)
             .rasterization_state(&rasterizer)
