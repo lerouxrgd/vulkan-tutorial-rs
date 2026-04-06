@@ -47,19 +47,12 @@ pub struct VertexBuffer {
 }
 
 impl VertexBuffer {
+    #[rustfmt::skip]
     pub const VERTICES: &[Vertex] = &[
-        Vertex {
-            pos: Vec2::new(0.0, -0.5),
-            color: Vec3::new(1.0, 0.0, 0.0),
-        },
-        Vertex {
-            pos: Vec2::new(0.5, 0.5),
-            color: Vec3::new(0.0, 1.0, 0.0),
-        },
-        Vertex {
-            pos: Vec2::new(-0.5, 0.5),
-            color: Vec3::new(0.0, 0.0, 1.0),
-        },
+        Vertex { pos: Vec2::new(-0.5, -0.5), color: Vec3::new(1.0, 0.0, 0.0) },
+        Vertex { pos: Vec2::new(0.5, -0.5),  color: Vec3::new(0.0, 1.0, 0.0) },
+        Vertex { pos: Vec2::new(0.5, 0.5),   color: Vec3::new(0.0, 0.0, 1.0) },
+        Vertex { pos: Vec2::new(-0.5, 0.5),  color: Vec3::new(1.0, 1.0, 1.0) },
     ];
 
     pub fn new(
@@ -122,6 +115,88 @@ impl VertexBuffer {
     ///
     /// - Must be called before the `ash::Device` that was used to create this
     ///   `VertexBuffer` is destroyed.
+    /// - The buffer must not be in use by the GPU (i.e. no command buffer
+    ///   currently reading from it is pending execution).
+    /// - Must be called at most once. Calling it more than once is undefined
+    ///   behaviour as the underlying handles become invalid after the first call.
+    pub unsafe fn destroy(&mut self, device: &Device) {
+        unsafe {
+            device.handle.destroy_buffer(self.handle, None);
+            device.handle.free_memory(self.memory, None);
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+#[non_exhaustive]
+pub struct IndexBuffer {
+    pub handle: vk::Buffer,
+    pub memory: vk::DeviceMemory,
+}
+
+impl IndexBuffer {
+    pub const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
+
+    pub fn new(
+        instance: &Instance,
+        physical_device: &PhysicalDevice,
+        device: &Device,
+        commands: &Commands,
+    ) -> anyhow::Result<Self> {
+        let instance_h = &instance.handle;
+        let physical_device_h = physical_device.handle;
+        let device_h = &device.handle;
+
+        let size = (mem::size_of::<u16>() * Self::INDICES.len()) as vk::DeviceSize;
+
+        let mut staging = RawBuffer::new(
+            instance_h,
+            physical_device_h,
+            device_h,
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
+
+        unsafe {
+            let data = device_h.map_memory(staging.memory, 0, size, vk::MemoryMapFlags::empty())?;
+            let slice = slice::from_raw_parts_mut(data as *mut u8, size as usize);
+            slice.copy_from_slice(bytemuck::cast_slice(Self::INDICES));
+            device_h.unmap_memory(staging.memory);
+        }
+
+        let RawBuffer { handle, memory } = RawBuffer::new(
+            instance_h,
+            physical_device_h,
+            device_h,
+            size,
+            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+
+        copy_buffer(
+            device_h,
+            device.queue,
+            commands.pool,
+            staging.handle,
+            handle,
+            size,
+        )?;
+
+        unsafe { staging.destroy(device) };
+
+        Ok(Self { handle, memory })
+    }
+
+    pub fn len(&self) -> u32 {
+        Self::INDICES.len() as u32
+    }
+
+    /// # Safety
+    ///
+    /// - Must be called before the `ash::Device` that was used to create this
+    ///   `IndexBuffer` is destroyed.
     /// - The buffer must not be in use by the GPU (i.e. no command buffer
     ///   currently reading from it is pending execution).
     /// - Must be called at most once. Calling it more than once is undefined

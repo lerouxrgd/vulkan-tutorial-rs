@@ -13,7 +13,7 @@ use std::slice;
 use anyhow::bail;
 use ash::vk;
 
-use crate::buffers::VertexBuffer;
+use crate::buffers::{IndexBuffer, VertexBuffer};
 use crate::commands::Commands;
 use crate::devices::{Device, PhysicalDevice};
 use crate::instance::Instance;
@@ -26,6 +26,7 @@ struct HelloTriangleApp {
     sdl_context: sdl3::Sdl,
     window: sdl3::video::Window,
     minimized: bool,
+    frame_index: usize,
     instance: Instance,
     surface: Surface,
     physical_device: PhysicalDevice,
@@ -35,7 +36,7 @@ struct HelloTriangleApp {
     commands: Commands,
     sync: SyncObjects,
     vertex_buffer: VertexBuffer,
-    frame_index: usize,
+    index_buffer: IndexBuffer,
 }
 
 impl HelloTriangleApp {
@@ -62,6 +63,7 @@ impl HelloTriangleApp {
         let commands = Commands::new(&device, &physical_device, Self::MAX_FRAMES_INFLIGHT)?;
         let sync = SyncObjects::new(&device, &swap_chain, Self::MAX_FRAMES_INFLIGHT)?;
         let vertex_buffer = VertexBuffer::new(&instance, &physical_device, &device, &commands)?;
+        let index_buffer = IndexBuffer::new(&instance, &physical_device, &device, &commands)?;
 
         log::info!("Selected device: {}", physical_device.name(&instance)?);
 
@@ -69,6 +71,7 @@ impl HelloTriangleApp {
             sdl_context,
             window,
             minimized: false,
+            frame_index: 0,
             instance,
             surface,
             physical_device,
@@ -78,7 +81,7 @@ impl HelloTriangleApp {
             commands,
             sync,
             vertex_buffer,
-            frame_index: 0,
+            index_buffer,
         })
     }
 
@@ -130,6 +133,7 @@ impl HelloTriangleApp {
             &self.swap_chain,
             &self.pipeline,
             &self.vertex_buffer,
+            &self.index_buffer,
             image_index as usize,
             self.frame_index,
         )?;
@@ -267,6 +271,7 @@ impl HelloTriangleApp {
 impl Drop for HelloTriangleApp {
     fn drop(&mut self) {
         unsafe {
+            self.index_buffer.destroy(&self.device);
             self.vertex_buffer.destroy(&self.device);
             self.sync.destroy(&self.device);
             self.commands.destroy(&self.device);

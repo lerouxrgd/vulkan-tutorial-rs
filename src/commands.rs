@@ -3,7 +3,7 @@ use std::slice;
 use ash::prelude::VkResult;
 use ash::vk;
 
-use crate::buffers::VertexBuffer;
+use crate::buffers::{IndexBuffer, VertexBuffer};
 use crate::devices::{Device, PhysicalDevice};
 use crate::pipeline::GraphicsPipeline;
 use crate::swap_chain::SwapChain;
@@ -42,14 +42,15 @@ impl Commands {
         swap_chain: &SwapChain,
         pipeline: &GraphicsPipeline,
         vertex_buffer: &VertexBuffer,
+        index_buffer: &IndexBuffer,
         image_index: usize,
         frame_index: usize,
     ) -> VkResult<()> {
-        let device = &device.handle;
+        let device_h = &device.handle;
         let cmd_buffer = self.buffers[frame_index];
 
         let begin_info = vk::CommandBufferBeginInfo::default();
-        unsafe { device.begin_command_buffer(cmd_buffer, &begin_info)? };
+        unsafe { device_h.begin_command_buffer(cmd_buffer, &begin_info)? };
 
         // Transition swapchain image to color attachment optimal for rendering
         //
@@ -68,7 +69,7 @@ impl Commands {
         // wait for), the transition happens, and then the actual color writes are
         // unblocked.
         Self::transition_image_layout(
-            device,
+            device_h,
             cmd_buffer,
             swap_chain.images[image_index],
             vk::ImageLayout::UNDEFINED,
@@ -99,9 +100,13 @@ impl Commands {
             .color_attachments(slice::from_ref(&attachment_info));
 
         unsafe {
-            device.cmd_begin_rendering(cmd_buffer, &rendering_info);
-            device.cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline.handle);
-            device.cmd_set_viewport(
+            device_h.cmd_begin_rendering(cmd_buffer, &rendering_info);
+            device_h.cmd_bind_pipeline(
+                cmd_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipeline.handle,
+            );
+            device_h.cmd_set_viewport(
                 cmd_buffer,
                 0,
                 &[vk::Viewport {
@@ -113,7 +118,7 @@ impl Commands {
                     max_depth: 1.0,
                 }],
             );
-            device.cmd_set_scissor(
+            device_h.cmd_set_scissor(
                 cmd_buffer,
                 0,
                 &[vk::Rect2D {
@@ -121,9 +126,15 @@ impl Commands {
                     extent: swap_chain.extent,
                 }],
             );
-            device.cmd_bind_vertex_buffers(cmd_buffer, 0, &[vertex_buffer.handle], &[0]);
-            device.cmd_draw(cmd_buffer, 3, 1, 0, 0);
-            device.cmd_end_rendering(cmd_buffer);
+            device_h.cmd_bind_vertex_buffers(cmd_buffer, 0, &[vertex_buffer.handle], &[0]);
+            device_h.cmd_bind_index_buffer(
+                cmd_buffer,
+                index_buffer.handle,
+                0,
+                vk::IndexType::UINT16,
+            );
+            device_h.cmd_draw_indexed(cmd_buffer, index_buffer.len(), 1, 0, 0, 0);
+            device_h.cmd_end_rendering(cmd_buffer);
         }
 
         // Transition swapchain image to present layout
@@ -133,7 +144,7 @@ impl Commands {
         // dst_stage:  BOTTOM_OF_PIPE           (before the end of the pipeline...)
         // dst_access: empty                    (...no GPU reads needed, presentation engine handles it)
         Self::transition_image_layout(
-            device,
+            device_h,
             cmd_buffer,
             swap_chain.images[image_index],
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -144,7 +155,7 @@ impl Commands {
             vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
         );
 
-        unsafe { device.end_command_buffer(cmd_buffer)? };
+        unsafe { device_h.end_command_buffer(cmd_buffer)? };
 
         Ok(())
     }
