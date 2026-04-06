@@ -61,7 +61,7 @@ impl HelloTriangleApp {
             GraphicsPipeline::new(&device, &swap_chain, concat!(env!("OUT_DIR"), "/slang.spv"))?;
         let commands = Commands::new(&device, &physical_device, Self::MAX_FRAMES_INFLIGHT)?;
         let sync = SyncObjects::new(&device, &swap_chain, Self::MAX_FRAMES_INFLIGHT)?;
-        let vertex_buffer = VertexBuffer::new(&instance, &physical_device, &device)?;
+        let vertex_buffer = VertexBuffer::new(&instance, &physical_device, &device, &commands)?;
 
         log::info!("Selected device: {}", physical_device.name(&instance)?);
 

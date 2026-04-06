@@ -5,23 +5,9 @@ use ash::vk;
 use bytemuck::{Pod, Zeroable};
 use glam::{Vec2, Vec3};
 
+use crate::commands::Commands;
 use crate::devices::{Device, PhysicalDevice};
 use crate::instance::Instance;
-
-pub const VERTICES: &[Vertex] = &[
-    Vertex {
-        pos: Vec2::new(0.0, -0.5),
-        color: Vec3::new(1.0, 0.0, 0.0),
-    },
-    Vertex {
-        pos: Vec2::new(0.5, 0.5),
-        color: Vec3::new(0.0, 1.0, 0.0),
-    },
-    Vertex {
-        pos: Vec2::new(-0.5, 0.5),
-        color: Vec3::new(0.0, 0.0, 1.0),
-    },
-];
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -60,46 +46,74 @@ pub struct VertexBuffer {
     pub memory: vk::DeviceMemory,
 }
 
-// TODO: use crate internal types here
 impl VertexBuffer {
+    pub const VERTICES: &[Vertex] = &[
+        Vertex {
+            pos: Vec2::new(0.0, -0.5),
+            color: Vec3::new(1.0, 0.0, 0.0),
+        },
+        Vertex {
+            pos: Vec2::new(0.5, 0.5),
+            color: Vec3::new(0.0, 1.0, 0.0),
+        },
+        Vertex {
+            pos: Vec2::new(-0.5, 0.5),
+            color: Vec3::new(0.0, 0.0, 1.0),
+        },
+    ];
+
     pub fn new(
         instance: &Instance,
         physical_device: &PhysicalDevice,
         device: &Device,
+        commands: &Commands,
     ) -> anyhow::Result<Self> {
-        let instance = &instance.handle;
-        let physical_device = physical_device.handle;
-        let device = &device.handle;
+        let instance_h = &instance.handle;
+        let physical_device_h = physical_device.handle;
+        let device_h = &device.handle;
 
-        let size = (mem::size_of::<Vertex>() * VERTICES.len()) as vk::DeviceSize;
+        let size = (mem::size_of::<Vertex>() * Self::VERTICES.len()) as vk::DeviceSize;
 
-        let buffer_ci = vk::BufferCreateInfo::default()
-            .size(size)
-            .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-            .sharing_mode(vk::SharingMode::EXCLUSIVE); // owned by one queue only
-        let handle = unsafe { device.create_buffer(&buffer_ci, None)? };
-
-        let mem_requirements = unsafe { device.get_buffer_memory_requirements(handle) };
-        let memory_type_index = find_memory_type(
-            instance,
-            physical_device,
-            mem_requirements.memory_type_bits,
-            // The below flags mean: GPU memory is directly mappable from the CPU and
-            // writes are immediately visible without explicit flushing
+        // Create staging buffer (CPU visible)
+        let mut staging = RawBuffer::new(
+            instance_h,
+            physical_device_h,
+            device_h,
+            size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
-        let alloc_info = vk::MemoryAllocateInfo::default()
-            .allocation_size(mem_requirements.size)
-            .memory_type_index(memory_type_index);
-        let memory = unsafe { device.allocate_memory(&alloc_info, None)? };
 
+        // Copy vertex data into staging buffer
         unsafe {
-            device.bind_buffer_memory(handle, memory, 0)?;
-            let data = device.map_memory(memory, 0, size, vk::MemoryMapFlags::empty())?;
+            let data = device_h.map_memory(staging.memory, 0, size, vk::MemoryMapFlags::empty())?;
             let slice = slice::from_raw_parts_mut(data as *mut u8, size as usize);
-            slice.copy_from_slice(bytemuck::cast_slice(VERTICES));
-            device.unmap_memory(memory);
+            slice.copy_from_slice(bytemuck::cast_slice(Self::VERTICES));
+            device_h.unmap_memory(staging.memory);
         }
+
+        // Create device-local vertex buffer (GPU only)
+        let RawBuffer { handle, memory } = RawBuffer::new(
+            instance_h,
+            physical_device_h,
+            device_h,
+            size,
+            vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+
+        // Copy staging -> device local
+        copy_buffer(
+            device_h,
+            device.queue,
+            commands.pool,
+            staging.handle,
+            handle,
+            size,
+        )?;
+
+        // Staging buffer no longer needed
+        unsafe { staging.destroy(device) };
 
         Ok(Self { handle, memory })
     }
@@ -113,6 +127,61 @@ impl VertexBuffer {
     /// - Must be called at most once. Calling it more than once is undefined
     ///   behaviour as the underlying handles become invalid after the first call.
     pub unsafe fn destroy(&mut self, device: &Device) {
+        unsafe {
+            device.handle.destroy_buffer(self.handle, None);
+            device.handle.free_memory(self.memory, None);
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+struct RawBuffer {
+    handle: vk::Buffer,
+    memory: vk::DeviceMemory,
+}
+
+impl RawBuffer {
+    fn new(
+        instance: &ash::Instance,
+        physical_device: vk::PhysicalDevice,
+        device: &ash::Device,
+        size: vk::DeviceSize,
+        usage: vk::BufferUsageFlags,
+        properties: vk::MemoryPropertyFlags,
+    ) -> anyhow::Result<Self> {
+        let buffer_ci = vk::BufferCreateInfo::default()
+            .size(size)
+            .usage(usage)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE); // owned by one queue only
+        let handle = unsafe { device.create_buffer(&buffer_ci, None)? };
+
+        let mem_requirements = unsafe { device.get_buffer_memory_requirements(handle) };
+        let memory_type_index = find_memory_type(
+            instance,
+            physical_device,
+            mem_requirements.memory_type_bits,
+            properties,
+        )?;
+        let alloc_info = vk::MemoryAllocateInfo::default()
+            .allocation_size(mem_requirements.size)
+            .memory_type_index(memory_type_index);
+        let memory = unsafe { device.allocate_memory(&alloc_info, None)? };
+
+        unsafe { device.bind_buffer_memory(handle, memory, 0)? };
+
+        Ok(RawBuffer { handle, memory })
+    }
+
+    /// # Safety
+    ///
+    /// - Must be called before the `ash::Device` that was used to create this
+    ///   `RawBuffer` is destroyed.
+    /// - The buffer must not be in use by the GPU (i.e. no command buffer
+    ///   currently reading from it is pending execution).
+    /// - Must be called at most once. Calling it more than once is undefined
+    ///   behaviour as the underlying handles become invalid after the first call.
+    unsafe fn destroy(&mut self, device: &Device) {
         unsafe {
             device.handle.destroy_buffer(self.handle, None);
             device.handle.free_memory(self.memory, None);
@@ -135,4 +204,44 @@ fn find_memory_type(
                     .contains(properties)
         })
         .ok_or_else(|| anyhow!("Failed to find suitable memory type"))
+}
+
+fn copy_buffer(
+    device: &ash::Device,
+    queue: vk::Queue,
+    command_pool: vk::CommandPool,
+    src: vk::Buffer,
+    dst: vk::Buffer,
+    size: vk::DeviceSize,
+) -> anyhow::Result<()> {
+    // Allocate a short-lived command buffer
+    let alloc_info = vk::CommandBufferAllocateInfo::default()
+        .command_pool(command_pool)
+        .level(vk::CommandBufferLevel::PRIMARY)
+        .command_buffer_count(1);
+    let cmd_buffer = unsafe { device.allocate_command_buffers(&alloc_info)?[0] };
+
+    // Record the copy
+    let begin_info =
+        vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+    unsafe {
+        device.begin_command_buffer(cmd_buffer, &begin_info)?;
+        device.cmd_copy_buffer(
+            cmd_buffer,
+            src,
+            dst,
+            &[vk::BufferCopy::default().size(size)],
+        );
+        device.end_command_buffer(cmd_buffer)?;
+    }
+
+    // Submit and wait
+    let submit_info = vk::SubmitInfo::default().command_buffers(slice::from_ref(&cmd_buffer));
+    unsafe {
+        device.queue_submit(queue, slice::from_ref(&submit_info), vk::Fence::null())?;
+        device.queue_wait_idle(queue)?;
+        device.free_command_buffers(command_pool, &[cmd_buffer]);
+    }
+
+    Ok(())
 }
