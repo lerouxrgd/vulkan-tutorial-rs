@@ -9,11 +9,12 @@ mod swap_chain;
 mod sync;
 
 use std::slice;
+use std::time::Instant;
 
 use anyhow::bail;
 use ash::vk;
 
-use crate::buffers::{IndexBuffer, VertexBuffer};
+use crate::buffers::{IndexBuffer, UniformBuffers, VertexBuffer};
 use crate::commands::Commands;
 use crate::devices::{Device, PhysicalDevice};
 use crate::instance::Instance;
@@ -23,6 +24,7 @@ use crate::swap_chain::SwapChain;
 use crate::sync::SyncObjects;
 
 struct HelloTriangleApp {
+    start_time: Instant,
     sdl_context: sdl3::Sdl,
     window: sdl3::video::Window,
     minimized: bool,
@@ -37,6 +39,7 @@ struct HelloTriangleApp {
     sync: SyncObjects,
     vertex_buffer: VertexBuffer,
     index_buffer: IndexBuffer,
+    uniform_buffers: UniformBuffers,
 }
 
 impl HelloTriangleApp {
@@ -64,10 +67,17 @@ impl HelloTriangleApp {
         let sync = SyncObjects::new(&device, &swap_chain, Self::MAX_FRAMES_INFLIGHT)?;
         let vertex_buffer = VertexBuffer::new(&instance, &physical_device, &device, &commands)?;
         let index_buffer = IndexBuffer::new(&instance, &physical_device, &device, &commands)?;
+        let uniform_buffers = UniformBuffers::new(
+            &instance,
+            &physical_device,
+            &device,
+            Self::MAX_FRAMES_INFLIGHT,
+        )?;
 
         log::info!("Selected device: {}", physical_device.name(&instance)?);
 
         Ok(Self {
+            start_time: Instant::now(),
             sdl_context,
             window,
             minimized: false,
@@ -82,10 +92,13 @@ impl HelloTriangleApp {
             sync,
             vertex_buffer,
             index_buffer,
+            uniform_buffers,
         })
     }
 
     fn draw_frame(&mut self) -> anyhow::Result<()> {
+        let time_delta = self.start_time.elapsed().as_secs_f32();
+
         let device_h = &self.device.handle;
         let inflight_fence = self.sync.inflight_fences[self.frame_index];
         let present_complete_semaphore = self.sync.present_complete_semaphores[self.frame_index];
@@ -124,8 +137,13 @@ impl HelloTriangleApp {
             }
             Err(e) => bail!("Failed to acquire acquire_next_image: {e}"),
         };
-        unsafe { device_h.reset_fences(slice::from_ref(&inflight_fence))? } // reset after acquiring next image
         let render_finished_semaphore = self.sync.render_finished_semaphores[image_index as usize];
+
+        self.uniform_buffers
+            .update(self.frame_index, time_delta, &self.swap_chain);
+
+        // Only reset the fence if we are submitting work
+        unsafe { device_h.reset_fences(slice::from_ref(&inflight_fence))? }
 
         // Record commands for this frame
         self.commands.record(
@@ -271,6 +289,7 @@ impl HelloTriangleApp {
 impl Drop for HelloTriangleApp {
     fn drop(&mut self) {
         unsafe {
+            self.uniform_buffers.destroy(&self.device);
             self.index_buffer.destroy(&self.device);
             self.vertex_buffer.destroy(&self.device);
             self.sync.destroy(&self.device);
