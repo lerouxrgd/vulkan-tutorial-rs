@@ -4,6 +4,7 @@ use ash::prelude::VkResult;
 use ash::vk;
 
 use crate::buffers::{IndexBuffer, VertexBuffer};
+use crate::descriptors::UboDescriptors;
 use crate::devices::{Device, PhysicalDevice};
 use crate::pipeline::GraphicsPipeline;
 use crate::swap_chain::SwapChain;
@@ -43,6 +44,7 @@ impl Commands {
         pipeline: &GraphicsPipeline,
         vertex_buffer: &VertexBuffer,
         index_buffer: &IndexBuffer,
+        ubo_descriptors: &UboDescriptors,
         image_index: usize,
         frame_index: usize,
     ) -> VkResult<()> {
@@ -132,6 +134,14 @@ impl Commands {
                 index_buffer.handle,
                 0,
                 vk::IndexType::UINT16,
+            );
+            device_h.cmd_bind_descriptor_sets(
+                cmd_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipeline.layout,
+                0,
+                slice::from_ref(&ubo_descriptors.desc_sets[frame_index]),
+                &[],
             );
             device_h.cmd_draw_indexed(cmd_buffer, index_buffer.len(), 1, 0, 0, 0);
             device_h.cmd_end_rendering(cmd_buffer);

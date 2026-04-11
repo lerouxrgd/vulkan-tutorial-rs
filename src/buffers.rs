@@ -220,9 +220,16 @@ pub struct UniformBufferObject {
     pub proj: Mat4,
 }
 
+#[non_exhaustive]
 pub struct UniformBuffer {
     raw: RawBuffer,
     pub mapped: *mut UniformBufferObject,
+}
+
+impl UniformBuffer {
+    pub fn handle(&self) -> vk::Buffer {
+        self.raw.handle
+    }
 }
 
 pub struct UniformBuffers {
@@ -260,6 +267,10 @@ impl UniformBuffers {
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         Ok(Self { buffers })
+    }
+
+    pub fn len(&self) -> usize {
+        self.buffers.len()
     }
 
     pub fn update(&self, current_frame: usize, time_delta: f32, swap_chain: &SwapChain) {
