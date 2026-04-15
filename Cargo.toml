@@ -11,4 +11,7 @@ env_logger = "0.11"
 glam = { version = "0.32", features = ["bytemuck"] }
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 log = "0.4"
-sdl3 = { version = "0.17", features = ["ash"] }
+sdl3 = { version = "0.18", features = ["ash"] }
+
+[patch.crates-io]
+sdl3 = { git = "https://github.com/lerouxrgd/sdl3-rs.git", branch = "fix/window-event-occluded" }

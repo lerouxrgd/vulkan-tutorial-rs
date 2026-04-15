@@ -221,8 +221,6 @@ impl HelloTriangleApp {
     }
 
     fn handle_event(&mut self, event: sdl3::event::Event) -> anyhow::Result<bool> {
-        const WINDOW_OCCLUDED: u32 = sdl3::sys::events::SDL_EVENT_WINDOW_OCCLUDED.0;
-
         match event {
             // Quit
             sdl3::event::Event::Quit { .. } => {
@@ -231,12 +229,7 @@ impl HelloTriangleApp {
 
             // Handle window minimization/restoration
             sdl3::event::Event::Window {
-                win_event: sdl3::event::WindowEvent::Minimized,
-                ..
-            }
-            | sdl3::event::Event::Unknown {
-                // FIXME: Replace with sdl3::event::WindowEvent::Occluded when it exists
-                type_: WINDOW_OCCLUDED,
+                win_event: sdl3::event::WindowEvent::Minimized | sdl3::event::WindowEvent::Occluded,
                 ..
             } => {
                 log::debug!("Window minimized/occluded");
