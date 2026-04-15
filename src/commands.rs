@@ -6,6 +6,7 @@ use ash::vk;
 use crate::buffers::{IndexBuffer, VertexBuffer};
 use crate::descriptors::UboDescriptors;
 use crate::devices::{Device, PhysicalDevice};
+use crate::images::transition_image_layout;
 use crate::pipeline::GraphicsPipeline;
 use crate::swap_chain::SwapChain;
 
@@ -37,6 +38,7 @@ impl Commands {
         Ok(Self { pool, buffers })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn record(
         &mut self,
         device: &Device,
@@ -70,7 +72,7 @@ impl Commands {
         // the very start of the frame. So the src side resolves instantly (nothing to
         // wait for), the transition happens, and then the actual color writes are
         // unblocked.
-        Self::transition_image_layout(
+        transition_image_layout(
             device_h,
             cmd_buffer,
             swap_chain.images[image_index],
@@ -128,10 +130,10 @@ impl Commands {
                     extent: swap_chain.extent,
                 }],
             );
-            device_h.cmd_bind_vertex_buffers(cmd_buffer, 0, &[vertex_buffer.handle], &[0]);
+            device_h.cmd_bind_vertex_buffers(cmd_buffer, 0, &[vertex_buffer.handle()], &[0]);
             device_h.cmd_bind_index_buffer(
                 cmd_buffer,
-                index_buffer.handle,
+                index_buffer.handle(),
                 0,
                 vk::IndexType::UINT16,
             );
@@ -153,7 +155,7 @@ impl Commands {
         // src_access: COLOR_ATTACHMENT_WRITE   (...and make those writes visible)
         // dst_stage:  BOTTOM_OF_PIPE           (before the end of the pipeline...)
         // dst_access: empty                    (...no GPU reads needed, presentation engine handles it)
-        Self::transition_image_layout(
+        transition_image_layout(
             device_h,
             cmd_buffer,
             swap_chain.images[image_index],
@@ -170,48 +172,6 @@ impl Commands {
         Ok(())
     }
 
-    /// Perform image layout transitions which tell the GPU how the image data is
-    /// physically arranged in memory.
-    #[allow(clippy::too_many_arguments)]
-    fn transition_image_layout(
-        device: &ash::Device,
-        command_buffer: vk::CommandBuffer,
-        image: vk::Image,
-        old_layout: vk::ImageLayout,
-        new_layout: vk::ImageLayout,
-        src_access_mask: vk::AccessFlags2,
-        dst_access_mask: vk::AccessFlags2,
-        src_stage_mask: vk::PipelineStageFlags2,
-        dst_stage_mask: vk::PipelineStageFlags2,
-    ) {
-        // Memory barriers (ImageMemoryBarrier2) synchronize within a single queue,
-        // controlling both execution order and memory visibility between pipeline
-        // stages.
-        let barrier = vk::ImageMemoryBarrier2::default()
-            .src_stage_mask(src_stage_mask)
-            .src_access_mask(src_access_mask)
-            .dst_stage_mask(dst_stage_mask)
-            .dst_access_mask(dst_access_mask)
-            .old_layout(old_layout)
-            .new_layout(new_layout)
-            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .image(image)
-            .subresource_range(
-                vk::ImageSubresourceRange::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .base_mip_level(0)
-                    .level_count(1)
-                    .base_array_layer(0)
-                    .layer_count(1),
-            );
-
-        let dependency_info =
-            vk::DependencyInfo::default().image_memory_barriers(slice::from_ref(&barrier));
-
-        unsafe { device.cmd_pipeline_barrier2(command_buffer, &dependency_info) };
-    }
-
     /// # Safety
     ///
     /// - Must be called before the `ash::Device` that was used to create this
@@ -226,4 +186,38 @@ impl Commands {
             device.handle.destroy_command_pool(self.pool, None);
         }
     }
+}
+
+/// Allocates a one-time-submit command buffer, calls `f` to record into it,
+/// then submits and waits for completion.
+pub fn one_time_submit(
+    device: &ash::Device,
+    queue: vk::Queue,
+    command_pool: vk::CommandPool,
+    f: impl FnOnce(vk::CommandBuffer),
+) -> VkResult<()> {
+    // Allocate a short-lived command buffer
+    let alloc_info = vk::CommandBufferAllocateInfo::default()
+        .command_pool(command_pool)
+        .level(vk::CommandBufferLevel::PRIMARY)
+        .command_buffer_count(1);
+    let cmd_buffer = unsafe { device.allocate_command_buffers(&alloc_info)?[0] };
+
+    let begin_info =
+        vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+    unsafe { device.begin_command_buffer(cmd_buffer, &begin_info)? };
+
+    f(cmd_buffer);
+
+    unsafe { device.end_command_buffer(cmd_buffer)? };
+
+    // Submit and wait
+    let submit_info = vk::SubmitInfo::default().command_buffers(slice::from_ref(&cmd_buffer));
+    unsafe {
+        device.queue_submit(queue, slice::from_ref(&submit_info), vk::Fence::null())?;
+        device.queue_wait_idle(queue)?;
+        device.free_command_buffers(command_pool, &[cmd_buffer]);
+    }
+
+    Ok(())
 }

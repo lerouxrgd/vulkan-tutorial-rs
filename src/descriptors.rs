@@ -8,6 +8,7 @@ use crate::buffers::{UniformBufferObject, UniformBuffers};
 use crate::devices::Device;
 use crate::pipeline::GraphicsPipeline;
 
+#[non_exhaustive]
 pub struct UboDescriptors {
     pub pool: vk::DescriptorPool,
     pub desc_sets: Vec<vk::DescriptorSet>,

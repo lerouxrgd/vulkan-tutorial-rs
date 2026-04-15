@@ -2,6 +2,7 @@ mod buffers;
 mod commands;
 mod descriptors;
 mod devices;
+mod images;
 mod instance;
 mod logging;
 mod pipeline;
@@ -19,6 +20,7 @@ use crate::buffers::{IndexBuffer, UniformBuffers, VertexBuffer};
 use crate::commands::Commands;
 use crate::descriptors::UboDescriptors;
 use crate::devices::{Device, PhysicalDevice};
+use crate::images::TextureImage;
 use crate::instance::Instance;
 use crate::pipeline::GraphicsPipeline;
 use crate::surface::Surface;
@@ -43,6 +45,7 @@ struct HelloTriangleApp {
     index_buffer: IndexBuffer,
     uniform_buffers: UniformBuffers,
     ubo_descriptors: UboDescriptors,
+    texture_image: TextureImage,
 }
 
 impl HelloTriangleApp {
@@ -78,6 +81,13 @@ impl HelloTriangleApp {
         )?;
         let mut ubo_descriptors = UboDescriptors::new(&device, uniform_buffers.len())?;
         ubo_descriptors.allocate_ubo_desc_sets(&device, &pipeline, &uniform_buffers)?;
+        let texture_image = TextureImage::new(
+            &instance,
+            &physical_device,
+            &device,
+            &commands,
+            "assets/texture.jpg",
+        )?;
 
         log::info!("Selected device: {}", physical_device.name(&instance)?);
 
@@ -99,6 +109,7 @@ impl HelloTriangleApp {
             index_buffer,
             uniform_buffers,
             ubo_descriptors,
+            texture_image,
         })
     }
 
@@ -296,6 +307,7 @@ impl HelloTriangleApp {
 impl Drop for HelloTriangleApp {
     fn drop(&mut self) {
         unsafe {
+            self.texture_image.destroy(&self.device);
             self.ubo_descriptors.destroy(&self.device);
             self.uniform_buffers.destroy(&self.device);
             self.index_buffer.destroy(&self.device);
