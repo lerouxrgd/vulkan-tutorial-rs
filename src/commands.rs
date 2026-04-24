@@ -76,12 +76,12 @@ impl Commands {
             device_h,
             cmd_buffer,
             swap_chain.images[image_index],
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, // src_stage
+            vk::AccessFlags2::empty(),                        // src_access_mask
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, // dst_stage
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,         // dst_access_mask
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            vk::AccessFlags2::empty(),                // srcAccessMask
-            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE, // dstAccessMask
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, // srcStage
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, // dstStage
         );
 
         let attachment_info = vk::RenderingAttachmentInfo::default()
@@ -159,12 +159,12 @@ impl Commands {
             device_h,
             cmd_buffer,
             swap_chain.images[image_index],
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+            vk::AccessFlags2::empty(),
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             vk::ImageLayout::PRESENT_SRC_KHR,
-            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-            vk::AccessFlags2::empty(),
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-            vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
         );
 
         unsafe { device_h.end_command_buffer(cmd_buffer)? };

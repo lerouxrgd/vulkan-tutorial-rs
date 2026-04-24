@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::slice;
 
+use ash::prelude::VkResult;
 use ash::vk;
 
 use crate::buffers::RawBuffer;
@@ -70,12 +71,12 @@ impl TextureImage {
                 device_h,
                 cmd,
                 image.handle,
+                vk::PipelineStageFlags2::TOP_OF_PIPE,
+                vk::AccessFlags2::empty(),
+                vk::PipelineStageFlags2::TRANSFER,
+                vk::AccessFlags2::TRANSFER_WRITE,
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                vk::AccessFlags2::empty(),
-                vk::AccessFlags2::TRANSFER_WRITE,
-                vk::PipelineStageFlags2::TOP_OF_PIPE,
-                vk::PipelineStageFlags2::TRANSFER,
             );
         })?;
 
@@ -94,12 +95,12 @@ impl TextureImage {
                 device_h,
                 cmd,
                 image.handle,
+                vk::PipelineStageFlags2::TRANSFER,
+                vk::AccessFlags2::TRANSFER_WRITE,
+                vk::PipelineStageFlags2::FRAGMENT_SHADER,
+                vk::AccessFlags2::SHADER_READ,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                vk::AccessFlags2::TRANSFER_WRITE,
-                vk::AccessFlags2::SHADER_READ,
-                vk::PipelineStageFlags2::TRANSFER,
-                vk::PipelineStageFlags2::FRAGMENT_SHADER,
             );
         })?;
 
@@ -134,6 +135,56 @@ impl TextureImage {
         unsafe {
             device.handle.destroy_image_view(self.view, None);
             self.image.destroy(&device.handle);
+        }
+    }
+}
+
+#[non_exhaustive]
+pub struct TextureSampler {
+    pub handle: vk::Sampler,
+}
+
+impl TextureSampler {
+    pub fn new(
+        instance: &Instance,
+        physical_device: &PhysicalDevice,
+        device: &Device,
+    ) -> VkResult<Self> {
+        let properties = unsafe {
+            instance
+                .handle
+                .get_physical_device_properties(physical_device.handle)
+        };
+
+        let sampler_info = vk::SamplerCreateInfo::default()
+            .mag_filter(vk::Filter::LINEAR)
+            .min_filter(vk::Filter::LINEAR)
+            .address_mode_u(vk::SamplerAddressMode::REPEAT)
+            .address_mode_v(vk::SamplerAddressMode::REPEAT)
+            .address_mode_w(vk::SamplerAddressMode::REPEAT)
+            .anisotropy_enable(true)
+            .max_anisotropy(properties.limits.max_sampler_anisotropy)
+            .compare_enable(false)
+            .compare_op(vk::CompareOp::ALWAYS)
+            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+            .mip_lod_bias(0.0)
+            .min_lod(0.0)
+            .max_lod(0.0);
+        let handle = unsafe { device.handle.create_sampler(&sampler_info, None) }?;
+
+        Ok(Self { handle })
+    }
+
+    /// # Safety
+    ///
+    /// - Must be called before the `ash::Device` that was used to create this
+    ///   `TextureSampler` is destroyed.
+    /// - The image must not be in use by the GPU.
+    /// - Must be called at most once. Calling it more than once is undefined
+    ///   behaviour as the underlying handles become invalid after the first call.
+    pub unsafe fn destroy(&mut self, device: &Device) {
+        unsafe {
+            device.handle.destroy_sampler(self.handle, None);
         }
     }
 }

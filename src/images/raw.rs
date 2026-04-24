@@ -84,25 +84,25 @@ pub fn transition_image_layout(
     device: &ash::Device,
     command_buffer: vk::CommandBuffer,
     image: vk::Image,
+    src_stage_mask: vk::PipelineStageFlags2,
+    src_access_mask: vk::AccessFlags2,
+    dst_stage_mask: vk::PipelineStageFlags2,
+    dst_access_mask: vk::AccessFlags2,
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
-    src_access_mask: vk::AccessFlags2,
-    dst_access_mask: vk::AccessFlags2,
-    src_stage_mask: vk::PipelineStageFlags2,
-    dst_stage_mask: vk::PipelineStageFlags2,
 ) {
     // Memory barriers (ImageMemoryBarrier2) synchronize within a single queue,
     // controlling both execution order and memory visibility between pipeline
     // stages.
     let barrier = vk::ImageMemoryBarrier2::default()
+        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED) // no qf ownership transfer
         .src_stage_mask(src_stage_mask)
         .src_access_mask(src_access_mask)
+        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED) // no qf ownership transfer
         .dst_stage_mask(dst_stage_mask)
         .dst_access_mask(dst_access_mask)
         .old_layout(old_layout)
         .new_layout(new_layout)
-        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED) // no qf ownership transfer
-        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED) // no qf ownership transfer
         .image(image)
         .subresource_range(
             vk::ImageSubresourceRange::default()

@@ -67,7 +67,8 @@ impl PhysicalDevice {
             .push_next(&mut vulkan_1_3_features)
             .push_next(&mut extended_dynamic_state_features);
         unsafe { instance.get_physical_device_features2(physical_device, &mut features) };
-        let supports_all_features = vulkan_1_1_features.shader_draw_parameters == vk::TRUE
+        let supports_all_features = features.features.sampler_anisotropy == vk::TRUE
+            && vulkan_1_1_features.shader_draw_parameters == vk::TRUE
             && vulkan_1_3_features.dynamic_rendering == vk::TRUE
             && vulkan_1_3_features.synchronization2 == vk::TRUE
             && extended_dynamic_state_features.extended_dynamic_state == vk::TRUE;
@@ -133,6 +134,7 @@ impl Device {
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default()
                 .extended_dynamic_state(true);
         let mut features = vk::PhysicalDeviceFeatures2::default()
+            .features(vk::PhysicalDeviceFeatures::default().sampler_anisotropy(true))
             .push_next(&mut vulkan_1_1_features)
             .push_next(&mut vulkan_1_3_features)
             .push_next(&mut extended_dynamic_state_features);
