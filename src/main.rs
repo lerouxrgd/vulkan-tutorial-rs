@@ -18,7 +18,7 @@ use ash::vk;
 
 use crate::buffers::{IndexBuffer, UniformBuffers, VertexBuffer};
 use crate::commands::Commands;
-use crate::descriptors::UboDescriptors;
+use crate::descriptors::Descriptors;
 use crate::devices::{Device, PhysicalDevice};
 use crate::images::{TextureImage, TextureSampler};
 use crate::instance::Instance;
@@ -29,24 +29,29 @@ use crate::sync::SyncObjects;
 
 struct HelloTriangleApp {
     start_time: Instant,
+
     sdl_context: sdl3::Sdl,
     window: sdl3::video::Window,
     minimized: bool,
     frame_index: usize,
+
     instance: Instance,
     surface: Surface,
     physical_device: PhysicalDevice,
     device: Device,
     swap_chain: SwapChain,
-    pipeline: GraphicsPipeline,
     commands: Commands,
     sync: SyncObjects,
+
     vertex_buffer: VertexBuffer,
     index_buffer: IndexBuffer,
+
+    descriptors: Descriptors,
     uniform_buffers: UniformBuffers,
-    ubo_descriptors: UboDescriptors,
     texture_image: TextureImage,
     texture_sampler: TextureSampler,
+
+    pipeline: GraphicsPipeline,
 }
 
 impl HelloTriangleApp {
@@ -68,20 +73,19 @@ impl HelloTriangleApp {
         let physical_device = PhysicalDevice::new(&instance, &surface)?;
         let device = Device::new(&instance, &physical_device)?;
         let swap_chain = SwapChain::new(&instance, &physical_device, &device, &surface, &window)?;
-        let pipeline =
-            GraphicsPipeline::new(&device, &swap_chain, concat!(env!("OUT_DIR"), "/slang.spv"))?;
         let commands = Commands::new(&device, &physical_device, Self::MAX_FRAMES_INFLIGHT)?;
         let sync = SyncObjects::new(&device, &swap_chain, Self::MAX_FRAMES_INFLIGHT)?;
+
         let vertex_buffer = VertexBuffer::new(&instance, &physical_device, &device, &commands)?;
         let index_buffer = IndexBuffer::new(&instance, &physical_device, &device, &commands)?;
+
+        let mut descriptors = Descriptors::new(&device, Self::MAX_FRAMES_INFLIGHT)?;
         let uniform_buffers = UniformBuffers::new(
             &instance,
             &physical_device,
             &device,
             Self::MAX_FRAMES_INFLIGHT,
         )?;
-        let mut ubo_descriptors = UboDescriptors::new(&device, uniform_buffers.len())?;
-        ubo_descriptors.allocate_ubo_desc_sets(&device, &pipeline, &uniform_buffers)?;
         let texture_image = TextureImage::new(
             &instance,
             &physical_device,
@@ -90,29 +94,47 @@ impl HelloTriangleApp {
             "assets/texture.jpg",
         )?;
         let texture_sampler = TextureSampler::new(&instance, &physical_device, &device)?;
+        descriptors.allocate_desc_sets(
+            &device,
+            &uniform_buffers,
+            &texture_image,
+            &texture_sampler,
+        )?;
+
+        let pipeline = GraphicsPipeline::new(
+            &device,
+            &swap_chain,
+            &descriptors,
+            concat!(env!("OUT_DIR"), "/slang.spv"),
+        )?;
 
         log::info!("Selected device: {}", physical_device.name(&instance)?);
 
         Ok(Self {
             start_time: Instant::now(),
+
             sdl_context,
             window,
             minimized: false,
             frame_index: 0,
+
             instance,
             surface,
             physical_device,
             device,
             swap_chain,
-            pipeline,
             commands,
             sync,
+
             vertex_buffer,
             index_buffer,
+
+            descriptors,
             uniform_buffers,
-            ubo_descriptors,
             texture_image,
             texture_sampler,
+
+            pipeline,
         })
     }
 
@@ -172,7 +194,7 @@ impl HelloTriangleApp {
             &self.pipeline,
             &self.vertex_buffer,
             &self.index_buffer,
-            &self.ubo_descriptors,
+            &self.descriptors,
             image_index as usize,
             self.frame_index,
         )?;
@@ -303,15 +325,18 @@ impl HelloTriangleApp {
 impl Drop for HelloTriangleApp {
     fn drop(&mut self) {
         unsafe {
+            self.pipeline.destroy(&self.device);
+
             self.texture_sampler.destroy(&self.device);
             self.texture_image.destroy(&self.device);
-            self.ubo_descriptors.destroy(&self.device);
             self.uniform_buffers.destroy(&self.device);
+            self.descriptors.destroy(&self.device);
+
             self.index_buffer.destroy(&self.device);
             self.vertex_buffer.destroy(&self.device);
+
             self.sync.destroy(&self.device);
             self.commands.destroy(&self.device);
-            self.pipeline.destroy(&self.device);
             self.swap_chain.destroy(&self.device);
             self.device.destroy();
             self.surface.destroy();

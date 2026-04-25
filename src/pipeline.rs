@@ -7,6 +7,7 @@ use anyhow::{anyhow, ensure};
 use ash::vk;
 
 use crate::buffers::Vertex;
+use crate::descriptors::Descriptors;
 use crate::devices::Device;
 use crate::swap_chain::SwapChain;
 
@@ -54,13 +55,13 @@ impl ShaderModule {
 pub struct GraphicsPipeline {
     pub handle: vk::Pipeline,
     pub layout: vk::PipelineLayout,
-    pub descriptor_set_layout: vk::DescriptorSetLayout,
 }
 
 impl GraphicsPipeline {
     pub fn new<P: AsRef<Path>>(
         device: &Device,
         swap_chain: &SwapChain,
+        descriptors: &Descriptors,
         spv_path: P,
     ) -> anyhow::Result<Self> {
         let mut shader_module = ShaderModule::from_spv_file(device, spv_path)?;
@@ -120,21 +121,8 @@ impl GraphicsPipeline {
         let dynamic_state =
             vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
-        let ubo_layout_binding = vk::DescriptorSetLayoutBinding::default()
-            .binding(0)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .descriptor_count(1)
-            .stage_flags(vk::ShaderStageFlags::VERTEX);
-        let descriptor_set_layout_ci = vk::DescriptorSetLayoutCreateInfo::default()
-            .bindings(slice::from_ref(&ubo_layout_binding));
-        let descriptor_set_layout = unsafe {
-            device
-                .handle
-                .create_descriptor_set_layout(&descriptor_set_layout_ci, None)?
-        };
-
         let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::default()
-            .set_layouts(slice::from_ref(&descriptor_set_layout));
+            .set_layouts(slice::from_ref(&descriptors.desc_set_layout));
         let layout = unsafe {
             device
                 .handle
@@ -170,11 +158,7 @@ impl GraphicsPipeline {
         // Shader module is no longer needed once the pipeline is compiled
         unsafe { shader_module.destroy(device) };
 
-        Ok(Self {
-            handle,
-            layout,
-            descriptor_set_layout,
-        })
+        Ok(Self { handle, layout })
     }
 
     /// # Safety
@@ -187,9 +171,6 @@ impl GraphicsPipeline {
         unsafe {
             device.handle.destroy_pipeline(self.handle, None);
             device.handle.destroy_pipeline_layout(self.layout, None);
-            device
-                .handle
-                .destroy_descriptor_set_layout(self.descriptor_set_layout, None); // must outlive pipeline
         }
     }
 }

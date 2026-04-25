@@ -14,6 +14,7 @@ use crate::instance::Instance;
 pub struct Vertex {
     pub pos: Vec2,
     pub color: Vec3,
+    pub tex_coord: Vec2,
 }
 
 impl Vertex {
@@ -24,7 +25,7 @@ impl Vertex {
             .input_rate(vk::VertexInputRate::VERTEX)
     }
 
-    pub fn attribute_descriptions() -> [vk::VertexInputAttributeDescription; 2] {
+    pub fn attribute_descriptions() -> [vk::VertexInputAttributeDescription; 3] {
         [
             vk::VertexInputAttributeDescription::default()
                 .location(0)
@@ -36,6 +37,11 @@ impl Vertex {
                 .binding(0)
                 .format(vk::Format::R32G32B32_SFLOAT) // 3×f32
                 .offset(mem::offset_of!(Self, color) as u32),
+            vk::VertexInputAttributeDescription::default()
+                .location(2)
+                .binding(0)
+                .format(vk::Format::R32G32_SFLOAT) // 2×f32
+                .offset(mem::offset_of!(Self, tex_coord) as u32),
         ]
     }
 }
@@ -48,10 +54,10 @@ pub struct VertexBuffer {
 impl VertexBuffer {
     #[rustfmt::skip]
     pub const VERTICES: &[Vertex] = &[
-        Vertex { pos: Vec2::new(-0.5, -0.5), color: Vec3::new(1.0, 0.0, 0.0) },
-        Vertex { pos: Vec2::new(0.5, -0.5),  color: Vec3::new(0.0, 1.0, 0.0) },
-        Vertex { pos: Vec2::new(0.5, 0.5),   color: Vec3::new(0.0, 0.0, 1.0) },
-        Vertex { pos: Vec2::new(-0.5, 0.5),  color: Vec3::new(1.0, 1.0, 1.0) },
+        Vertex { pos: Vec2::new(-0.5, -0.5), color: Vec3::new(1.0, 0.0, 0.0), tex_coord: Vec2::new(1.0, 0.0) },
+        Vertex { pos: Vec2::new(0.5, -0.5),  color: Vec3::new(0.0, 1.0, 0.0), tex_coord: Vec2::new(0.0, 0.0) },
+        Vertex { pos: Vec2::new(0.5, 0.5),   color: Vec3::new(0.0, 0.0, 1.0), tex_coord: Vec2::new(0.0, 1.0) },
+        Vertex { pos: Vec2::new(-0.5, 0.5),  color: Vec3::new(1.0, 1.0, 1.0), tex_coord: Vec2::new(1.0, 1.0) },
     ];
 
     pub fn new(
