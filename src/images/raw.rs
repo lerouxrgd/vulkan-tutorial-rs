@@ -84,6 +84,7 @@ pub fn transition_image_layout(
     device: &ash::Device,
     command_buffer: vk::CommandBuffer,
     image: vk::Image,
+    image_aspect_flags: vk::ImageAspectFlags,
     src_stage_mask: vk::PipelineStageFlags2,
     src_access_mask: vk::AccessFlags2,
     dst_stage_mask: vk::PipelineStageFlags2,
@@ -106,7 +107,7 @@ pub fn transition_image_layout(
         .image(image)
         .subresource_range(
             vk::ImageSubresourceRange::default()
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .aspect_mask(image_aspect_flags)
                 .base_mip_level(0)
                 .level_count(1)
                 .base_array_layer(0)

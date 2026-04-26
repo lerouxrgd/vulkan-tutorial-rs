@@ -12,7 +12,7 @@ use crate::instance::Instance;
 
 #[non_exhaustive]
 pub struct TextureImage {
-    pub image: RawImage,
+    raw: RawImage,
     pub view: vk::ImageView,
 }
 
@@ -53,7 +53,7 @@ impl TextureImage {
         }
 
         // Create device-local image
-        let image = RawImage::new(
+        let raw = RawImage::new(
             &instance.handle,
             physical_device.handle,
             &device.handle,
@@ -70,7 +70,8 @@ impl TextureImage {
             transition_image_layout(
                 device_h,
                 cmd,
-                image.handle,
+                raw.handle,
+                vk::ImageAspectFlags::COLOR,
                 vk::PipelineStageFlags2::TOP_OF_PIPE,
                 vk::AccessFlags2::empty(),
                 vk::PipelineStageFlags2::TRANSFER,
@@ -85,7 +86,7 @@ impl TextureImage {
             device.queue,
             commands.pool,
             staging.handle, // src
-            image.handle,   // dst
+            raw.handle,     // dst
             width,
             height,
         )?;
@@ -94,7 +95,8 @@ impl TextureImage {
             transition_image_layout(
                 device_h,
                 cmd,
-                image.handle,
+                raw.handle,
+                vk::ImageAspectFlags::COLOR,
                 vk::PipelineStageFlags2::TRANSFER,
                 vk::AccessFlags2::TRANSFER_WRITE,
                 vk::PipelineStageFlags2::FRAGMENT_SHADER,
@@ -108,7 +110,7 @@ impl TextureImage {
 
         // Create image view
         let view_ci = vk::ImageViewCreateInfo::default()
-            .image(image.handle)
+            .image(raw.handle)
             .view_type(vk::ImageViewType::TYPE_2D)
             .format(vk::Format::R8G8B8A8_SRGB)
             .subresource_range(
@@ -121,7 +123,7 @@ impl TextureImage {
             );
         let view = unsafe { device_h.create_image_view(&view_ci, None)? };
 
-        Ok(Self { image, view })
+        Ok(Self { raw, view })
     }
 
     /// # Safety
@@ -134,7 +136,7 @@ impl TextureImage {
     pub unsafe fn destroy(&mut self, device: &Device) {
         unsafe {
             device.handle.destroy_image_view(self.view, None);
-            self.image.destroy(&device.handle);
+            self.raw.destroy(&device.handle);
         }
     }
 }

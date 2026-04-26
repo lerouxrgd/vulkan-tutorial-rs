@@ -103,6 +103,13 @@ impl GraphicsPipeline {
             .rasterization_samples(vk::SampleCountFlags::TYPE_1) // no MSAA
             .sample_shading_enable(false);
 
+        let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
+            .depth_test_enable(true)
+            .depth_write_enable(true)
+            .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL)
+            .depth_bounds_test_enable(false)
+            .stencil_test_enable(false);
+
         let color_blend_attachment = vk::PipelineColorBlendAttachmentState::default()
             .blend_enable(false)
             .color_write_mask(
@@ -130,7 +137,8 @@ impl GraphicsPipeline {
         };
 
         let mut pipeline_rendering_ci = vk::PipelineRenderingCreateInfo::default()
-            .color_attachment_formats(slice::from_ref(&swap_chain.surface_format.format));
+            .color_attachment_formats(slice::from_ref(&swap_chain.surface_format.format))
+            .depth_attachment_format(swap_chain.depth_image.format);
 
         let pipeline_ci = vk::GraphicsPipelineCreateInfo::default()
             .stages(&shader_stages)
@@ -139,6 +147,7 @@ impl GraphicsPipeline {
             .viewport_state(&viewport_state)
             .rasterization_state(&rasterizer)
             .multisample_state(&multisampling)
+            .depth_stencil_state(&depth_stencil)
             .color_blend_state(&color_blending)
             .dynamic_state(&dynamic_state)
             .layout(layout)

@@ -12,7 +12,7 @@ use crate::instance::Instance;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct Vertex {
-    pub pos: Vec2,
+    pub pos: Vec3,
     pub color: Vec3,
     pub tex_coord: Vec2,
 }
@@ -30,7 +30,7 @@ impl Vertex {
             vk::VertexInputAttributeDescription::default()
                 .location(0)
                 .binding(0)
-                .format(vk::Format::R32G32_SFLOAT) // 2×f32
+                .format(vk::Format::R32G32B32_SFLOAT) // 3×f32
                 .offset(mem::offset_of!(Self, pos) as u32),
             vk::VertexInputAttributeDescription::default()
                 .location(1)
@@ -54,10 +54,15 @@ pub struct VertexBuffer {
 impl VertexBuffer {
     #[rustfmt::skip]
     pub const VERTICES: &[Vertex] = &[
-        Vertex { pos: Vec2::new(-0.5, -0.5), color: Vec3::new(1.0, 0.0, 0.0), tex_coord: Vec2::new(1.0, 0.0) },
-        Vertex { pos: Vec2::new(0.5, -0.5),  color: Vec3::new(0.0, 1.0, 0.0), tex_coord: Vec2::new(0.0, 0.0) },
-        Vertex { pos: Vec2::new(0.5, 0.5),   color: Vec3::new(0.0, 0.0, 1.0), tex_coord: Vec2::new(0.0, 1.0) },
-        Vertex { pos: Vec2::new(-0.5, 0.5),  color: Vec3::new(1.0, 1.0, 1.0), tex_coord: Vec2::new(1.0, 1.0) },
+        Vertex { pos: Vec3::new(-0.5, -0.5, 0.0), color: Vec3::new(1.0, 0.0, 0.0), tex_coord: Vec2::new(1.0, 0.0) },
+        Vertex { pos: Vec3::new(0.5, -0.5, 0.0),  color: Vec3::new(0.0, 1.0, 0.0), tex_coord: Vec2::new(0.0, 0.0) },
+        Vertex { pos: Vec3::new(0.5, 0.5, 0.0),   color: Vec3::new(0.0, 0.0, 1.0), tex_coord: Vec2::new(0.0, 1.0) },
+        Vertex { pos: Vec3::new(-0.5, 0.5, 0.0),  color: Vec3::new(1.0, 1.0, 1.0), tex_coord: Vec2::new(1.0, 1.0) },
+
+        Vertex { pos: Vec3::new(-0.5, -0.5, -0.5), color: Vec3::new(1.0, 0.0, 0.0), tex_coord: Vec2::new(1.0, 0.0) },
+        Vertex { pos: Vec3::new(0.5, -0.5, -0.5),  color: Vec3::new(0.0, 1.0, 0.0), tex_coord: Vec2::new(0.0, 0.0) },
+        Vertex { pos: Vec3::new(0.5, 0.5, -0.5),   color: Vec3::new(0.0, 0.0, 1.0), tex_coord: Vec2::new(0.0, 1.0) },
+        Vertex { pos: Vec3::new(-0.5, 0.5, -0.5),  color: Vec3::new(1.0, 1.0, 1.0), tex_coord: Vec2::new(1.0, 1.0) },
     ];
 
     pub fn new(

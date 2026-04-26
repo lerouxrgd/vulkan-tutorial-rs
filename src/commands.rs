@@ -76,6 +76,7 @@ impl Commands {
             device_h,
             cmd_buffer,
             swap_chain.images[image_index],
+            vk::ImageAspectFlags::COLOR,
             vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, // src_stage
             vk::AccessFlags2::empty(),                        // src_access_mask
             vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT, // dst_stage
@@ -84,14 +85,41 @@ impl Commands {
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         );
 
-        let attachment_info = vk::RenderingAttachmentInfo::default()
+        // Transition depth image to depth attachment optimal for rendering
+        transition_image_layout(
+            device_h,
+            cmd_buffer,
+            swap_chain.depth_image.handle(),
+            vk::ImageAspectFlags::DEPTH,
+            vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
+            vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+        );
+
+        let color_attachment_info = vk::RenderingAttachmentInfo::default()
             .image_view(swap_chain.image_views[image_index])
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
             .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
+            .store_op(vk::AttachmentStoreOp::STORE) // keep after rendering so it can be presented
             .clear_value(vk::ClearValue {
                 color: vk::ClearColorValue {
                     float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            });
+        let depth_attachment_info = vk::RenderingAttachmentInfo::default()
+            .image_view(swap_chain.depth_image.view)
+            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::DONT_CARE) // don't save the depth buffer after rendering
+            .clear_value(vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
                 },
             });
 
@@ -101,7 +129,8 @@ impl Commands {
                 extent: swap_chain.extent,
             })
             .layer_count(1)
-            .color_attachments(slice::from_ref(&attachment_info));
+            .color_attachments(slice::from_ref(&color_attachment_info))
+            .depth_attachment(&depth_attachment_info);
 
         unsafe {
             device_h.cmd_begin_rendering(cmd_buffer, &rendering_info);
@@ -159,6 +188,7 @@ impl Commands {
             device_h,
             cmd_buffer,
             swap_chain.images[image_index],
+            vk::ImageAspectFlags::COLOR,
             vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
             vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
             vk::PipelineStageFlags2::BOTTOM_OF_PIPE,

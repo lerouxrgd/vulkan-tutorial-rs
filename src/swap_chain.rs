@@ -2,6 +2,7 @@ use anyhow::ensure;
 use ash::{khr, vk};
 
 use crate::devices::{Device, PhysicalDevice};
+use crate::images::DepthImage;
 use crate::instance::Instance;
 use crate::surface::Surface;
 
@@ -13,6 +14,7 @@ pub struct SwapChain {
     pub extent: vk::Extent2D,
     pub images: Vec<vk::Image>,
     pub image_views: Vec<vk::ImageView>,
+    pub depth_image: DepthImage,
 }
 
 impl SwapChain {
@@ -87,6 +89,14 @@ impl SwapChain {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        let depth_image = DepthImage::new(
+            &instance,
+            &physical_device,
+            &device,
+            extent.width,
+            extent.height,
+        )?;
+
         Ok(Self {
             fns,
             handle,
@@ -94,6 +104,7 @@ impl SwapChain {
             extent,
             images,
             image_views,
+            depth_image,
         })
     }
 
@@ -180,6 +191,7 @@ impl SwapChain {
     ///   behaviour as the underlying handle becomes invalid after the first call.
     pub unsafe fn destroy(&mut self, device: &Device) {
         unsafe {
+            self.depth_image.destroy(device);
             for &image_view in &self.image_views {
                 device.handle.destroy_image_view(image_view, None);
             }

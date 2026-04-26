@@ -12,7 +12,11 @@ pub struct IndexBuffer {
 }
 
 impl IndexBuffer {
-    pub const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
+    #[rustfmt::skip]
+    pub const INDICES: &[u16] = &[
+        0, 1, 2, 2, 3, 0,
+        4, 5, 6, 6, 7, 4,
+    ];
 
     pub fn new(
         instance: &Instance,
