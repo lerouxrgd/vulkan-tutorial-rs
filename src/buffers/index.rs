@@ -9,26 +9,22 @@ use crate::instance::Instance;
 
 pub struct IndexBuffer {
     raw: RawBuffer,
+    pub length: u32,
 }
 
 impl IndexBuffer {
-    #[rustfmt::skip]
-    pub const INDICES: &[u16] = &[
-        0, 1, 2, 2, 3, 0,
-        4, 5, 6, 6, 7, 4,
-    ];
-
     pub fn new(
         instance: &Instance,
         physical_device: &PhysicalDevice,
         device: &Device,
         commands: &Commands,
+        indices: &[u32],
     ) -> anyhow::Result<Self> {
         let instance_h = &instance.handle;
         let physical_device_h = physical_device.handle;
         let device_h = &device.handle;
 
-        let size = mem::size_of_val(Self::INDICES) as vk::DeviceSize;
+        let size = mem::size_of_val(indices) as vk::DeviceSize;
 
         let mut staging = RawBuffer::new(
             instance_h,
@@ -41,7 +37,7 @@ impl IndexBuffer {
         unsafe {
             let data = device_h.map_memory(staging.memory, 0, size, vk::MemoryMapFlags::empty())?;
             let slice = slice::from_raw_parts_mut(data as *mut u8, size as usize);
-            slice.copy_from_slice(bytemuck::cast_slice(Self::INDICES));
+            slice.copy_from_slice(bytemuck::cast_slice(indices));
             device_h.unmap_memory(staging.memory);
         }
 
@@ -67,15 +63,14 @@ impl IndexBuffer {
 
         unsafe { staging.destroy(device_h) };
 
-        Ok(Self { raw })
+        Ok(Self {
+            raw,
+            length: indices.len() as u32,
+        })
     }
 
     pub fn handle(&self) -> vk::Buffer {
         self.raw.handle
-    }
-
-    pub fn len(&self) -> u32 {
-        Self::INDICES.len() as u32
     }
 
     /// # Safety

@@ -4,7 +4,7 @@ use std::process::Command;
 
 fn main() {
     // Re-run if the shader changes
-    println!("cargo:rerun-if-changed=assets/shader.slang");
+    println!("cargo:rerun-if-changed=assets/sahders/shader.slang");
 
     let slangc = find_slangc();
 
@@ -13,7 +13,7 @@ fn main() {
 
     let status = Command::new(&slangc)
         .args([
-            "assets/shader.slang",
+            "assets/shaders/shader.slang",
             "-target",
             "spirv",
             "-profile",

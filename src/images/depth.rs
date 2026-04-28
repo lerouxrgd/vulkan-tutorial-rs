@@ -33,6 +33,7 @@ impl DepthImage {
             vk::ImageTiling::OPTIMAL,
             vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT,
         )?;
+        log::debug!("Selected depth format: {format:?}");
 
         let raw = RawImage::new(
             &instance.handle,

@@ -164,7 +164,7 @@ impl Commands {
                 cmd_buffer,
                 index_buffer.handle(),
                 0,
-                vk::IndexType::UINT16,
+                vk::IndexType::UINT32,
             );
             device_h.cmd_bind_descriptor_sets(
                 cmd_buffer,
@@ -174,7 +174,7 @@ impl Commands {
                 slice::from_ref(&descriptors.desc_sets[frame_index]),
                 &[],
             );
-            device_h.cmd_draw_indexed(cmd_buffer, index_buffer.len(), 1, 0, 0, 0);
+            device_h.cmd_draw_indexed(cmd_buffer, index_buffer.length, 1, 0, 0, 0);
             device_h.cmd_end_rendering(cmd_buffer);
         }
 

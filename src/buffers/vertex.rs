@@ -52,30 +52,18 @@ pub struct VertexBuffer {
 }
 
 impl VertexBuffer {
-    #[rustfmt::skip]
-    pub const VERTICES: &[Vertex] = &[
-        Vertex { pos: Vec3::new(-0.5, -0.5, 0.0), color: Vec3::new(1.0, 0.0, 0.0), tex_coord: Vec2::new(1.0, 0.0) },
-        Vertex { pos: Vec3::new(0.5, -0.5, 0.0),  color: Vec3::new(0.0, 1.0, 0.0), tex_coord: Vec2::new(0.0, 0.0) },
-        Vertex { pos: Vec3::new(0.5, 0.5, 0.0),   color: Vec3::new(0.0, 0.0, 1.0), tex_coord: Vec2::new(0.0, 1.0) },
-        Vertex { pos: Vec3::new(-0.5, 0.5, 0.0),  color: Vec3::new(1.0, 1.0, 1.0), tex_coord: Vec2::new(1.0, 1.0) },
-
-        Vertex { pos: Vec3::new(-0.5, -0.5, -0.5), color: Vec3::new(1.0, 0.0, 0.0), tex_coord: Vec2::new(1.0, 0.0) },
-        Vertex { pos: Vec3::new(0.5, -0.5, -0.5),  color: Vec3::new(0.0, 1.0, 0.0), tex_coord: Vec2::new(0.0, 0.0) },
-        Vertex { pos: Vec3::new(0.5, 0.5, -0.5),   color: Vec3::new(0.0, 0.0, 1.0), tex_coord: Vec2::new(0.0, 1.0) },
-        Vertex { pos: Vec3::new(-0.5, 0.5, -0.5),  color: Vec3::new(1.0, 1.0, 1.0), tex_coord: Vec2::new(1.0, 1.0) },
-    ];
-
     pub fn new(
         instance: &Instance,
         physical_device: &PhysicalDevice,
         device: &Device,
         commands: &Commands,
+        vertices: &[Vertex],
     ) -> anyhow::Result<Self> {
         let instance_h = &instance.handle;
         let physical_device_h = physical_device.handle;
         let device_h = &device.handle;
 
-        let size = mem::size_of_val(Self::VERTICES) as vk::DeviceSize;
+        let size = mem::size_of_val(vertices) as vk::DeviceSize;
 
         // Create staging buffer (CPU visible)
         let mut staging = RawBuffer::new(
@@ -91,7 +79,7 @@ impl VertexBuffer {
         unsafe {
             let data = device_h.map_memory(staging.memory, 0, size, vk::MemoryMapFlags::empty())?;
             let slice = slice::from_raw_parts_mut(data as *mut u8, size as usize);
-            slice.copy_from_slice(bytemuck::cast_slice(Self::VERTICES));
+            slice.copy_from_slice(bytemuck::cast_slice(vertices));
             device_h.unmap_memory(staging.memory);
         }
 

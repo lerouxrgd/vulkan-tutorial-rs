@@ -16,7 +16,7 @@ use std::time::Instant;
 use anyhow::bail;
 use ash::vk;
 
-use crate::buffers::{IndexBuffer, UniformBuffers, VertexBuffer};
+use crate::buffers::{IndexBuffer, Model, UniformBuffers, VertexBuffer};
 use crate::commands::Commands;
 use crate::descriptors::Descriptors;
 use crate::devices::{Device, PhysicalDevice};
@@ -76,8 +76,21 @@ impl HelloTriangleApp {
         let commands = Commands::new(&device, &physical_device, Self::MAX_FRAMES_INFLIGHT)?;
         let sync = SyncObjects::new(&device, &swap_chain, Self::MAX_FRAMES_INFLIGHT)?;
 
-        let vertex_buffer = VertexBuffer::new(&instance, &physical_device, &device, &commands)?;
-        let index_buffer = IndexBuffer::new(&instance, &physical_device, &device, &commands)?;
+        let model = Model::from_obj("assets/models/viking_room.obj")?;
+        let vertex_buffer = VertexBuffer::new(
+            &instance,
+            &physical_device,
+            &device,
+            &commands,
+            &model.vertices,
+        )?;
+        let index_buffer = IndexBuffer::new(
+            &instance,
+            &physical_device,
+            &device,
+            &commands,
+            &model.indices,
+        )?;
 
         let mut descriptors = Descriptors::new(&device, Self::MAX_FRAMES_INFLIGHT)?;
         let uniform_buffers = UniformBuffers::new(
@@ -91,7 +104,7 @@ impl HelloTriangleApp {
             &physical_device,
             &device,
             &commands,
-            "assets/texture.jpg",
+            "assets/textures/viking_room.png",
         )?;
         let texture_sampler = TextureSampler::new(&instance, &physical_device, &device)?;
         descriptors.allocate_desc_sets(

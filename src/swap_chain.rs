@@ -90,9 +90,9 @@ impl SwapChain {
             .collect::<Result<Vec<_>, _>>()?;
 
         let depth_image = DepthImage::new(
-            &instance,
-            &physical_device,
-            &device,
+            instance,
+            physical_device,
+            device,
             extent.width,
             extent.height,
         )?;
