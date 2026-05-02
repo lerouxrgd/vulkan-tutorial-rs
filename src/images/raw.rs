@@ -24,6 +24,7 @@ impl RawImage {
         tiling: vk::ImageTiling,
         usage: vk::ImageUsageFlags,
         properties: vk::MemoryPropertyFlags,
+        mip_levels: u32,
     ) -> anyhow::Result<Self> {
         let image_ci = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
@@ -36,7 +37,7 @@ impl RawImage {
                     depth: 1,
                 },
             )
-            .mip_levels(1)
+            .mip_levels(mip_levels)
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(tiling)
@@ -91,6 +92,7 @@ pub fn transition_image_layout(
     dst_access_mask: vk::AccessFlags2,
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
+    mip_levels: u32,
 ) {
     // Memory barriers (ImageMemoryBarrier2) synchronize within a single queue,
     // controlling both execution order and memory visibility between pipeline
@@ -109,7 +111,7 @@ pub fn transition_image_layout(
             vk::ImageSubresourceRange::default()
                 .aspect_mask(image_aspect_flags)
                 .base_mip_level(0)
-                .level_count(1)
+                .level_count(mip_levels)
                 .base_array_layer(0)
                 .layer_count(1),
         );

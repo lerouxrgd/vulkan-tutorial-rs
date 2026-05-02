@@ -45,6 +45,7 @@ impl DepthImage {
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            1,
         )?;
 
         let view_ci = vk::ImageViewCreateInfo::default()

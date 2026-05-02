@@ -83,6 +83,7 @@ impl Commands {
             vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,         // dst_access_mask
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            1, // swapchain images always have a single mip level
         );
 
         // Transition depth image to depth attachment optimal for rendering
@@ -99,6 +100,7 @@ impl Commands {
             vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+            1,
         );
 
         let color_attachment_info = vk::RenderingAttachmentInfo::default()
@@ -195,6 +197,7 @@ impl Commands {
             vk::AccessFlags2::empty(),
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             vk::ImageLayout::PRESENT_SRC_KHR,
+            1, // swapchain images always have a single mip level
         );
 
         unsafe { device_h.end_command_buffer(cmd_buffer)? };
