@@ -16,6 +16,3 @@ image = { version = "0.25", default-features = false, features = [
 log = "0.4"
 sdl3 = { version = "0.18", features = ["ash"] }
 tobj = { version = "4", default-features = false }
-
-[patch.crates-io]
-sdl3 = { git = "https://github.com/lerouxrgd/sdl3-rs.git", branch = "fix/window-event-occluded" }
