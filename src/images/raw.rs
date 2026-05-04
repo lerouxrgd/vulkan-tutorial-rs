@@ -25,6 +25,7 @@ impl RawImage {
         usage: vk::ImageUsageFlags,
         properties: vk::MemoryPropertyFlags,
         mip_levels: u32,
+        num_samples: vk::SampleCountFlags,
     ) -> anyhow::Result<Self> {
         let image_ci = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
@@ -39,7 +40,7 @@ impl RawImage {
             )
             .mip_levels(mip_levels)
             .array_layers(1)
-            .samples(vk::SampleCountFlags::TYPE_1)
+            .samples(num_samples)
             .tiling(tiling)
             .usage(usage)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);

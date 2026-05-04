@@ -8,7 +8,7 @@ use ash::vk;
 
 use crate::buffers::Vertex;
 use crate::descriptors::Descriptors;
-use crate::devices::Device;
+use crate::devices::{Device, PhysicalDevice};
 use crate::swap_chain::SwapChain;
 
 #[non_exhaustive]
@@ -59,6 +59,7 @@ pub struct GraphicsPipeline {
 
 impl GraphicsPipeline {
     pub fn new<P: AsRef<Path>>(
+        physical_device: &PhysicalDevice,
         device: &Device,
         swap_chain: &SwapChain,
         descriptors: &Descriptors,
@@ -100,8 +101,9 @@ impl GraphicsPipeline {
             .line_width(1.0);
 
         let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1) // no MSAA
-            .sample_shading_enable(false);
+            .rasterization_samples(physical_device.msaa_samples)
+            .sample_shading_enable(false) // disable sample shading in the pipeline
+            .min_sample_shading(0.2); // min fraction for sample shading; closer to one is smoother
 
         let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
             .depth_test_enable(true)

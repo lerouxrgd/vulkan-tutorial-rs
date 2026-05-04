@@ -115,13 +115,14 @@ impl HelloTriangleApp {
         )?;
 
         let pipeline = GraphicsPipeline::new(
+            &physical_device,
             &device,
             &swap_chain,
             &descriptors,
             concat!(env!("OUT_DIR"), "/slang.spv"),
         )?;
 
-        log::info!("Selected device: {}", physical_device.name(&instance)?);
+        log::info!("Selected device: {physical_device:?}");
 
         Ok(Self {
             start_time: Instant::now(),

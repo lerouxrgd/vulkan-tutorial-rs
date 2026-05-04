@@ -86,6 +86,21 @@ impl Commands {
             1, // swapchain images always have a single mip level
         );
 
+        // Transition color image to color attachment optimal for rendering
+        transition_image_layout(
+            device_h,
+            cmd_buffer,
+            swap_chain.color_image.handle(),
+            vk::ImageAspectFlags::COLOR,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            1,
+        );
+
         // Transition depth image to depth attachment optimal for rendering
         transition_image_layout(
             device_h,
@@ -103,9 +118,13 @@ impl Commands {
             1,
         );
 
+        // Color attachment (multisampled) with resolve attachment
         let color_attachment_info = vk::RenderingAttachmentInfo::default()
-            .image_view(swap_chain.image_views[image_index])
+            .image_view(swap_chain.color_image.view)
             .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .resolve_mode(vk::ResolveModeFlags::AVERAGE)
+            .resolve_image_view(swap_chain.image_views[image_index])
+            .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
             .load_op(vk::AttachmentLoadOp::CLEAR)
             .store_op(vk::AttachmentStoreOp::STORE) // keep after rendering so it can be presented
             .clear_value(vk::ClearValue {

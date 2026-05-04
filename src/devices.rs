@@ -10,10 +10,14 @@ use crate::surface::Surface;
 
 const REQUIRED_DEVICE_EXTENSIONS: &[&CStr] = &[khr::swapchain::NAME];
 
+#[derive(Debug)]
+#[allow(dead_code)]
 #[non_exhaustive]
 pub struct PhysicalDevice {
     pub handle: vk::PhysicalDevice,
+    pub name: String,
     pub queue_family: u32,
+    pub msaa_samples: vk::SampleCountFlags,
 }
 
 impl PhysicalDevice {
@@ -22,9 +26,15 @@ impl PhysicalDevice {
         devices
             .into_iter()
             .find_map(|device| {
-                Self::check_device(&instance.handle, device, surface).map(|queue_family| Self {
-                    handle: device,
-                    queue_family,
+                Self::check_device(&instance.handle, device, surface).and_then(|queue_family| {
+                    let msaa_samples = Self::max_usable_sample_count(&instance.handle, device);
+                    let name = Self::name(&instance.handle, device).ok()?;
+                    Some(Self {
+                        handle: device,
+                        name,
+                        queue_family,
+                        msaa_samples,
+                    })
                 })
             })
             .ok_or_else(|| anyhow!("Couldn't find suitable physical device"))
@@ -68,6 +78,7 @@ impl PhysicalDevice {
             .push_next(&mut extended_dynamic_state_features);
         unsafe { instance.get_physical_device_features2(physical_device, &mut features) };
         let supports_all_features = features.features.sampler_anisotropy == vk::TRUE
+            && features.features.sample_rate_shading == vk::TRUE
             && vulkan_1_1_features.shader_draw_parameters == vk::TRUE
             && vulkan_1_3_features.dynamic_rendering == vk::TRUE
             && vulkan_1_3_features.synchronization2 == vk::TRUE
@@ -91,13 +102,36 @@ impl PhysicalDevice {
             .map(|(qf, _)| qf as u32)
     }
 
-    pub fn name(&self, instance: &Instance) -> anyhow::Result<String> {
+    fn max_usable_sample_count(
+        instance: &ash::Instance,
+        physical_device: vk::PhysicalDevice,
+    ) -> vk::SampleCountFlags {
+        let properties = unsafe { instance.get_physical_device_properties(physical_device) };
+        let counts = properties.limits.framebuffer_color_sample_counts
+            & properties.limits.framebuffer_depth_sample_counts;
+
+        for flag in [
+            vk::SampleCountFlags::TYPE_64,
+            vk::SampleCountFlags::TYPE_32,
+            vk::SampleCountFlags::TYPE_16,
+            vk::SampleCountFlags::TYPE_8,
+            vk::SampleCountFlags::TYPE_4,
+            vk::SampleCountFlags::TYPE_2,
+        ] {
+            if counts.contains(flag) {
+                return flag;
+            }
+        }
+
+        vk::SampleCountFlags::TYPE_1
+    }
+
+    fn name(
+        instance: &ash::Instance,
+        physical_device: vk::PhysicalDevice,
+    ) -> anyhow::Result<String> {
         let mut properties = vk::PhysicalDeviceProperties2::default();
-        unsafe {
-            instance
-                .handle
-                .get_physical_device_properties2(self.handle, &mut properties)
-        };
+        unsafe { instance.get_physical_device_properties2(physical_device, &mut properties) };
         let name = properties
             .properties
             .device_name_as_c_str()?
@@ -106,6 +140,8 @@ impl PhysicalDevice {
         Ok(name)
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////////////
 
 #[non_exhaustive]
 pub struct Device {
@@ -134,7 +170,11 @@ impl Device {
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default()
                 .extended_dynamic_state(true);
         let mut features = vk::PhysicalDeviceFeatures2::default()
-            .features(vk::PhysicalDeviceFeatures::default().sampler_anisotropy(true))
+            .features(
+                vk::PhysicalDeviceFeatures::default()
+                    .sampler_anisotropy(true)
+                    .sample_rate_shading(true),
+            )
             .push_next(&mut vulkan_1_1_features)
             .push_next(&mut vulkan_1_3_features)
             .push_next(&mut extended_dynamic_state_features);

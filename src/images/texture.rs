@@ -68,6 +68,7 @@ impl TextureImage {
                 | vk::ImageUsageFlags::SAMPLED,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             mip_levels,
+            vk::SampleCountFlags::TYPE_1,
         )?;
 
         one_time_submit(device_h, device.queue, commands.pool, |cmd| {
