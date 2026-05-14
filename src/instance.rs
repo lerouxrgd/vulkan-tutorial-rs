@@ -17,7 +17,7 @@ impl Instance {
         let entry = unsafe { ash::Entry::load()? };
 
         let app_info = vk::ApplicationInfo::default()
-            .application_name(c"Hello Triangle")
+            .application_name(c"Hello Vulkan")
             .application_version(vk::make_api_version(0, 1, 0, 0))
             .engine_name(c"No Engine")
             .engine_version(vk::make_api_version(0, 1, 0, 0))

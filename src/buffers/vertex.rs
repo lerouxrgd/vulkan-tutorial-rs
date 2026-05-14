@@ -5,7 +5,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Vec2, Vec3};
 
 use crate::buffers::raw::RawBuffer;
-use crate::commands::{Commands, one_time_submit};
+use crate::commands::{SceneCommands, one_time_submit};
 use crate::devices::{Device, PhysicalDevice};
 use crate::instance::Instance;
 
@@ -56,7 +56,7 @@ impl VertexBuffer {
         instance: &Instance,
         physical_device: &PhysicalDevice,
         device: &Device,
-        commands: &Commands,
+        commands: &SceneCommands,
         vertices: &[Vertex],
     ) -> anyhow::Result<Self> {
         let instance_h = &instance.handle;

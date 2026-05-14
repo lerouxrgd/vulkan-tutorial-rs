@@ -72,32 +72,37 @@ impl PhysicalDevice {
         let mut vulkan_1_3_features = vk::PhysicalDeviceVulkan13Features::default();
         let mut extended_dynamic_state_features =
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default();
+        let mut timeline_semaphore_features =
+            vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR::default();
         let mut features = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut vulkan_1_1_features)
             .push_next(&mut vulkan_1_3_features)
-            .push_next(&mut extended_dynamic_state_features);
+            .push_next(&mut extended_dynamic_state_features)
+            .push_next(&mut timeline_semaphore_features);
         unsafe { instance.get_physical_device_features2(physical_device, &mut features) };
         let supports_all_features = features.features.sampler_anisotropy == vk::TRUE
             && features.features.sample_rate_shading == vk::TRUE
             && vulkan_1_1_features.shader_draw_parameters == vk::TRUE
             && vulkan_1_3_features.dynamic_rendering == vk::TRUE
             && vulkan_1_3_features.synchronization2 == vk::TRUE
-            && extended_dynamic_state_features.extended_dynamic_state == vk::TRUE;
+            && extended_dynamic_state_features.extended_dynamic_state == vk::TRUE
+            && timeline_semaphore_features.timeline_semaphore == vk::TRUE;
         if !supports_all_features {
             return None;
         }
 
-        // Find a queue family supporting both graphics and presentation
+        // Find a queue family supporting graphics, presentation and compute
         let queue_families =
             unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
         queue_families
             .iter()
             .enumerate()
             .find(|&(qf, qfp)| {
+                let supports_compute = qfp.queue_flags.contains(vk::QueueFlags::COMPUTE);
                 let supports_graphics = qfp.queue_flags.contains(vk::QueueFlags::GRAPHICS);
                 let supports_presentation =
                     surface.is_queue_family_suitable(physical_device, qf as u32);
-                supports_graphics && supports_presentation
+                supports_compute && supports_graphics && supports_presentation
             })
             .map(|(qf, _)| qf as u32)
     }
@@ -169,6 +174,8 @@ impl Device {
         let mut extended_dynamic_state_features =
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default()
                 .extended_dynamic_state(true);
+        let mut timeline_semaphore_features =
+            vk::PhysicalDeviceTimelineSemaphoreFeatures::default().timeline_semaphore(true);
         let mut features = vk::PhysicalDeviceFeatures2::default()
             .features(
                 vk::PhysicalDeviceFeatures::default()
@@ -177,7 +184,8 @@ impl Device {
             )
             .push_next(&mut vulkan_1_1_features)
             .push_next(&mut vulkan_1_3_features)
-            .push_next(&mut extended_dynamic_state_features);
+            .push_next(&mut extended_dynamic_state_features)
+            .push_next(&mut timeline_semaphore_features);
 
         let device_ci = vk::DeviceCreateInfo::default()
             .queue_create_infos(slice::from_ref(&queue_ci))

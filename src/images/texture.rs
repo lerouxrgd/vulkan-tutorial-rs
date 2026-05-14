@@ -6,7 +6,7 @@ use ash::prelude::VkResult;
 use ash::vk::{self, ImageUsageFlags};
 
 use crate::buffers::RawBuffer;
-use crate::commands::{Commands, one_time_submit};
+use crate::commands::{SceneCommands, one_time_submit};
 use crate::devices::{Device, PhysicalDevice};
 use crate::images::raw::{RawImage, copy_buffer_to_image, transition_image_layout};
 use crate::instance::Instance;
@@ -22,7 +22,7 @@ impl TextureImage {
         instance: &Instance,
         physical_device: &PhysicalDevice,
         device: &Device,
-        commands: &Commands,
+        commands: &SceneCommands,
         path: P,
     ) -> anyhow::Result<Self>
     where

@@ -3,7 +3,7 @@ use std::{mem, slice};
 use ash::vk;
 
 use crate::buffers::raw::RawBuffer;
-use crate::commands::{Commands, one_time_submit};
+use crate::commands::{SceneCommands, one_time_submit};
 use crate::devices::{Device, PhysicalDevice};
 use crate::instance::Instance;
 
@@ -17,7 +17,7 @@ impl IndexBuffer {
         instance: &Instance,
         physical_device: &PhysicalDevice,
         device: &Device,
-        commands: &Commands,
+        commands: &SceneCommands,
         indices: &[u32],
     ) -> anyhow::Result<Self> {
         let instance_h = &instance.handle;

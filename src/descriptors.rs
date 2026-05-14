@@ -4,18 +4,18 @@ use std::slice;
 use ash::prelude::VkResult;
 use ash::vk;
 
-use crate::buffers::{UniformBufferObject, UniformBuffers};
+use crate::buffers::{DeltaTime, MvpMatrices, Particle, StorageBuffers, UniformBuffers};
 use crate::devices::Device;
 use crate::images::{TextureImage, TextureSampler};
 
 #[non_exhaustive]
-pub struct Descriptors {
+pub struct SceneDescriptors {
     pub desc_set_layout: vk::DescriptorSetLayout,
     pub pool: vk::DescriptorPool,
     pub desc_sets: Vec<vk::DescriptorSet>,
 }
 
-impl Descriptors {
+impl SceneDescriptors {
     pub fn new(device: &Device, max_frames_in_flight: usize) -> VkResult<Self> {
         let bindings = [
             vk::DescriptorSetLayoutBinding::default()
@@ -62,7 +62,7 @@ impl Descriptors {
     pub fn allocate_desc_sets(
         &mut self,
         device: &Device,
-        uniform_buffers: &UniformBuffers,
+        uniform_buffers: &UniformBuffers<MvpMatrices>,
         texture: &TextureImage,
         sampler: &TextureSampler,
     ) -> VkResult<()> {
@@ -79,7 +79,7 @@ impl Descriptors {
             let buffer_info = vk::DescriptorBufferInfo::default()
                 .buffer(uniform_buffers.buffers[i].handle())
                 .offset(0)
-                .range(mem::size_of::<UniformBufferObject>() as vk::DeviceSize);
+                .range(uniform_buffers.ubo_size() as vk::DeviceSize);
 
             let image_info = vk::DescriptorImageInfo::default()
                 .sampler(sampler.handle)
@@ -89,7 +89,7 @@ impl Descriptors {
             // For descriptor set i...
             let descriptor_writes = [
                 // At binding 0, point at uniform_buffers[i] starting at offset 0
-                // with a range of sizeof(UniformBufferObject)
+                // with a range of sizeof(MvpMatrices)
                 vk::WriteDescriptorSet::default()
                     .dst_set(desc_set)
                     .dst_binding(0)
@@ -127,6 +127,145 @@ impl Descriptors {
     pub unsafe fn destroy(&mut self, device: &Device) {
         unsafe {
             // Freeing the pool implicitly frees all descriptor sets allocated from it
+            device.handle.destroy_descriptor_pool(self.pool, None);
+            device
+                .handle
+                .destroy_descriptor_set_layout(self.desc_set_layout, None);
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+#[non_exhaustive]
+pub struct ParticlesDescriptors {
+    pub desc_set_layout: vk::DescriptorSetLayout,
+    pub pool: vk::DescriptorPool,
+    pub desc_sets: Vec<vk::DescriptorSet>,
+}
+
+impl ParticlesDescriptors {
+    pub fn new(device: &Device, max_frames_in_flight: usize) -> VkResult<Self> {
+        let bindings = [
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::COMPUTE),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(1)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::COMPUTE),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(2)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::COMPUTE),
+        ];
+
+        let desc_set_layout_ci = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
+        let desc_set_layout = unsafe {
+            device
+                .handle
+                .create_descriptor_set_layout(&desc_set_layout_ci, None)?
+        };
+
+        let pool_sizes = [
+            vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(max_frames_in_flight as u32),
+            vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(max_frames_in_flight as u32 * 2), // last + current frame
+        ];
+
+        let pool_ci = vk::DescriptorPoolCreateInfo::default()
+            .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
+            .max_sets(max_frames_in_flight as u32)
+            .pool_sizes(&pool_sizes);
+
+        let pool = unsafe { device.handle.create_descriptor_pool(&pool_ci, None)? };
+
+        Ok(Self {
+            desc_set_layout,
+            pool,
+            desc_sets: Vec::new(),
+        })
+    }
+
+    pub fn allocate_desc_sets(
+        &mut self,
+        device: &Device,
+        uniform_buffers: &UniformBuffers<DeltaTime>,
+        storage_buffers: &StorageBuffers,
+    ) -> VkResult<()> {
+        let max_frames_in_flight = uniform_buffers.len();
+
+        let layouts = vec![self.desc_set_layout; max_frames_in_flight];
+        let alloc_info = vk::DescriptorSetAllocateInfo::default()
+            .descriptor_pool(self.pool)
+            .set_layouts(&layouts);
+
+        self.desc_sets = unsafe { device.handle.allocate_descriptor_sets(&alloc_info)? };
+
+        for (i, &desc_set) in self.desc_sets.iter().enumerate() {
+            let ubo_info = vk::DescriptorBufferInfo::default()
+                .buffer(uniform_buffers.buffers[i].handle())
+                .offset(0)
+                .range(uniform_buffers.ubo_size() as vk::DeviceSize);
+
+            let last_frame = (i + max_frames_in_flight - 1) % max_frames_in_flight;
+            let storage_last_frame_info = vk::DescriptorBufferInfo::default()
+                .buffer(storage_buffers.buffers[last_frame].handle())
+                .offset(0)
+                .range((mem::size_of::<Particle>() * Particle::COUNT) as vk::DeviceSize);
+
+            let storage_current_frame_info = vk::DescriptorBufferInfo::default()
+                .buffer(storage_buffers.buffers[i].handle())
+                .offset(0)
+                .range((mem::size_of::<Particle>() * Particle::COUNT) as vk::DeviceSize);
+
+            let descriptor_writes = [
+                vk::WriteDescriptorSet::default()
+                    .dst_set(desc_set)
+                    .dst_binding(0)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .buffer_info(slice::from_ref(&ubo_info)),
+                vk::WriteDescriptorSet::default()
+                    .dst_set(desc_set)
+                    .dst_binding(1)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(slice::from_ref(&storage_last_frame_info)),
+                vk::WriteDescriptorSet::default()
+                    .dst_set(desc_set)
+                    .dst_binding(2)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .buffer_info(slice::from_ref(&storage_current_frame_info)),
+            ];
+
+            unsafe {
+                device
+                    .handle
+                    .update_descriptor_sets(&descriptor_writes, &[])
+            };
+        }
+
+        Ok(())
+    }
+
+    /// # Safety
+    ///
+    /// - Must be called before the `ash::Device` that was used to create this
+    ///   `ParticlesDescriptors` is destroyed.
+    /// - All descriptor sets allocated from the pool must no longer be in use
+    ///   by the GPU.
+    /// - Must be called at most once.
+    pub unsafe fn destroy(&mut self, device: &Device) {
+        unsafe {
             device.handle.destroy_descriptor_pool(self.pool, None);
             device
                 .handle

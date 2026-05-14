@@ -1,11 +1,13 @@
 mod index;
 mod raw;
+mod storage;
 mod uniform;
 mod vertex;
 
 pub use self::index::IndexBuffer;
 pub use self::raw::{RawBuffer, find_memory_type};
-pub use self::uniform::{UniformBufferObject, UniformBuffers};
+pub use self::storage::{Particle, StorageBuffers};
+pub use self::uniform::{DeltaTime, MvpMatrices, UniformBuffers};
 pub use self::vertex::{Vertex, VertexBuffer};
 
 pub struct Model {

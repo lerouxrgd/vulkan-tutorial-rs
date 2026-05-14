@@ -1,34 +1,20 @@
-mod buffers;
-mod commands;
-mod descriptors;
-mod devices;
-mod images;
-mod instance;
-mod logging;
-mod pipeline;
-mod surface;
-mod swap_chain;
-mod sync;
-
 use std::slice;
 use std::time::Instant;
 
 use anyhow::bail;
 use ash::vk;
+use vulkan_tuto::buffers::{DeltaTime, StorageBuffers, UniformBuffers};
+use vulkan_tuto::commands::ParticlesCommands;
+use vulkan_tuto::descriptors::ParticlesDescriptors;
+use vulkan_tuto::devices::{Device, PhysicalDevice};
+use vulkan_tuto::instance::Instance;
+use vulkan_tuto::pipelines::{ParticlesComputePipeline, ParticlesPipeline};
+use vulkan_tuto::surface::Surface;
+use vulkan_tuto::swap_chain::SwapChain;
+use vulkan_tuto::sync::ParticlesSync;
 
-use crate::buffers::{IndexBuffer, Model, UniformBuffers, VertexBuffer};
-use crate::commands::Commands;
-use crate::descriptors::Descriptors;
-use crate::devices::{Device, PhysicalDevice};
-use crate::images::{TextureImage, TextureSampler};
-use crate::instance::Instance;
-use crate::pipeline::GraphicsPipeline;
-use crate::surface::Surface;
-use crate::swap_chain::SwapChain;
-use crate::sync::SyncObjects;
-
-struct HelloTriangleApp {
-    start_time: Instant,
+struct HelloParticlesApp {
+    last_frame_time: Instant,
 
     sdl_context: sdl3::Sdl,
     window: sdl3::video::Window,
@@ -40,21 +26,18 @@ struct HelloTriangleApp {
     physical_device: PhysicalDevice,
     device: Device,
     swap_chain: SwapChain,
-    commands: Commands,
-    sync: SyncObjects,
+    commands: ParticlesCommands,
+    sync: ParticlesSync,
 
-    vertex_buffer: VertexBuffer,
-    index_buffer: IndexBuffer,
+    descriptors: ParticlesDescriptors,
+    uniform_buffers: UniformBuffers<DeltaTime>,
+    storage_buffers: StorageBuffers,
 
-    descriptors: Descriptors,
-    uniform_buffers: UniformBuffers,
-    texture_image: TextureImage,
-    texture_sampler: TextureSampler,
-
-    pipeline: GraphicsPipeline,
+    graphics_pipeline: ParticlesPipeline,
+    compute_pipeline: ParticlesComputePipeline,
 }
 
-impl HelloTriangleApp {
+impl HelloParticlesApp {
     const WIDTH: u32 = 800;
     const HEIGHT: u32 = 600;
     const MAX_FRAMES_INFLIGHT: usize = 2;
@@ -63,7 +46,7 @@ impl HelloTriangleApp {
         let sdl_context = sdl3::init()?;
         let video = sdl_context.video()?;
         let window = video
-            .window("Hello Triangle", Self::WIDTH, Self::HEIGHT)
+            .window("Hello Particles", Self::WIDTH, Self::HEIGHT)
             .vulkan()
             .resizable()
             .build()?;
@@ -73,59 +56,43 @@ impl HelloTriangleApp {
         let physical_device = PhysicalDevice::new(&instance, &surface)?;
         let device = Device::new(&instance, &physical_device)?;
         let swap_chain = SwapChain::new(&instance, &physical_device, &device, &surface, &window)?;
-        let commands = Commands::new(&device, &physical_device, Self::MAX_FRAMES_INFLIGHT)?;
-        let sync = SyncObjects::new(&device, &swap_chain, Self::MAX_FRAMES_INFLIGHT)?;
+        let commands =
+            ParticlesCommands::new(&device, &physical_device, Self::MAX_FRAMES_INFLIGHT)?;
+        let sync = ParticlesSync::new(&device, Self::MAX_FRAMES_INFLIGHT)?;
 
-        let model = Model::from_obj("assets/models/viking_room.obj")?;
-        let vertex_buffer = VertexBuffer::new(
+        let mut descriptors = ParticlesDescriptors::new(&device, Self::MAX_FRAMES_INFLIGHT)?;
+        let storage_buffers = StorageBuffers::new(
             &instance,
             &physical_device,
             &device,
             &commands,
-            &model.vertices,
-        )?;
-        let index_buffer = IndexBuffer::new(
-            &instance,
-            &physical_device,
-            &device,
-            &commands,
-            &model.indices,
+            Self::MAX_FRAMES_INFLIGHT,
+            Self::WIDTH,
+            Self::HEIGHT,
         )?;
 
-        let mut descriptors = Descriptors::new(&device, Self::MAX_FRAMES_INFLIGHT)?;
         let uniform_buffers = UniformBuffers::new(
             &instance,
             &physical_device,
             &device,
             Self::MAX_FRAMES_INFLIGHT,
         )?;
-        let texture_image = TextureImage::new(
-            &instance,
-            &physical_device,
-            &device,
-            &commands,
-            "assets/textures/viking_room.png",
-        )?;
-        let texture_sampler = TextureSampler::new(&instance, &physical_device, &device)?;
-        descriptors.allocate_desc_sets(
-            &device,
-            &uniform_buffers,
-            &texture_image,
-            &texture_sampler,
-        )?;
+        descriptors.allocate_desc_sets(&device, &uniform_buffers, &storage_buffers)?;
 
-        let pipeline = GraphicsPipeline::new(
-            &physical_device,
+        let graphics_pipeline = ParticlesPipeline::new(
             &device,
             &swap_chain,
-            &descriptors,
-            concat!(env!("OUT_DIR"), "/slang.spv"),
+            concat!(env!("OUT_DIR"), "/particles_graphics.spv"),
         )?;
 
-        log::info!("Selected device: {physical_device:?}");
+        let compute_pipeline = ParticlesComputePipeline::new(
+            &device,
+            &descriptors,
+            concat!(env!("OUT_DIR"), "/particles_compute.spv"),
+        )?;
 
         Ok(Self {
-            start_time: Instant::now(),
+            last_frame_time: Instant::now(),
 
             sdl_context,
             window,
@@ -140,36 +107,31 @@ impl HelloTriangleApp {
             commands,
             sync,
 
-            vertex_buffer,
-            index_buffer,
-
             descriptors,
             uniform_buffers,
-            texture_image,
-            texture_sampler,
+            storage_buffers,
 
-            pipeline,
+            graphics_pipeline,
+            compute_pipeline,
         })
     }
 
     fn draw_frame(&mut self) -> anyhow::Result<()> {
-        let time_delta = self.start_time.elapsed().as_secs_f32();
+        let frame_start = Instant::now();
 
         let device_h = &self.device.handle;
         let inflight_fence = self.sync.inflight_fences[self.frame_index];
-        let present_complete_semaphore = self.sync.present_complete_semaphores[self.frame_index];
-        let command_buffer = self.commands.buffers[self.frame_index];
-
-        // Wait for the previous frame to finish
-        unsafe { device_h.wait_for_fences(slice::from_ref(&inflight_fence), true, u64::MAX)? }
 
         // Acquire next swapchain image
+        //
+        // Signal the in-flight fence when the swapchain image is available,
+        // so we know it is safe to re-record this frame slot's command buffers.
         let next_image = unsafe {
             self.swap_chain.fns.acquire_next_image(
                 self.swap_chain.handle,
                 u64::MAX,
-                present_complete_semaphore,
-                vk::Fence::null(),
+                vk::Semaphore::null(),
+                inflight_fence,
             )
         };
         let image_index = match next_image {
@@ -193,44 +155,109 @@ impl HelloTriangleApp {
             }
             Err(e) => bail!("Failed to acquire acquire_next_image: {e}"),
         };
-        let render_finished_semaphore = self.sync.render_finished_semaphores[image_index as usize];
 
-        self.uniform_buffers
-            .update(self.frame_index, time_delta, &self.swap_chain);
+        // Wait for previous use of this frame slot
+        unsafe {
+            device_h.wait_for_fences(slice::from_ref(&inflight_fence), true, u64::MAX)?;
+            device_h.reset_fences(slice::from_ref(&inflight_fence))?;
+        }
 
-        // Only reset the fence if we are submitting work
-        unsafe { device_h.reset_fences(slice::from_ref(&inflight_fence))? }
+        // compute_wait_value is read from self.sync.timeline_value which was last
+        // written as graphics_signal_value of the previous frame. This is what
+        // chains frames together: compute[N] cannot start until graphics[N-1]
+        // has finished.
+        let compute_wait_value = self.sync.timeline_value;
+        let compute_signal_value = {
+            self.sync.timeline_value += 1;
+            self.sync.timeline_value
+        };
+        let graphics_wait_value = compute_signal_value;
+        let graphics_signal_value = {
+            self.sync.timeline_value += 1;
+            self.sync.timeline_value
+        };
 
-        // Record commands for this frame
-        self.commands.record(
+        // Update UBO
+        let delta_time = frame_start.duration_since(self.last_frame_time);
+        self.uniform_buffers.update(self.frame_index, delta_time);
+
+        // Submit compute — waits for N, signals N+1.
+        // Ensures we don't overwrite particle positions while the previous
+        // frame's graphics pass may still be reading them.
+        self.commands.record_compute(
+            &self.device,
+            &self.compute_pipeline,
+            &self.descriptors,
+            self.frame_index,
+        )?;
+
+        let compute_wait_stage = vk::PipelineStageFlags::COMPUTE_SHADER;
+        let mut compute_timeline_info = vk::TimelineSemaphoreSubmitInfo::default()
+            .wait_semaphore_values(slice::from_ref(&compute_wait_value))
+            .signal_semaphore_values(slice::from_ref(&compute_signal_value));
+
+        let compute_submit_info = vk::SubmitInfo::default()
+            .push_next(&mut compute_timeline_info)
+            .wait_semaphores(slice::from_ref(&self.sync.semaphore))
+            .wait_dst_stage_mask(slice::from_ref(&compute_wait_stage))
+            .command_buffers(slice::from_ref(
+                &self.commands.compute_cmd_buffers[self.frame_index],
+            ))
+            .signal_semaphores(slice::from_ref(&self.sync.semaphore));
+
+        unsafe {
+            device_h.queue_submit(
+                self.device.queue,
+                slice::from_ref(&compute_submit_info),
+                vk::Fence::null(),
+            )?;
+        }
+
+        // Submit graphics — waits for N+1, signals N+2.
+        // Ensures we don't render particles before compute has finished
+        // writing their new positions.
+        self.commands.record_graphics(
             &self.device,
             &self.swap_chain,
-            &self.pipeline,
-            &self.vertex_buffer,
-            &self.index_buffer,
-            &self.descriptors,
+            &self.graphics_pipeline,
+            &self.storage_buffers,
             image_index as usize,
             self.frame_index,
         )?;
 
-        // Submit command buffer
-        let wait_dst_stage_mask = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT; // will be gated by semaphore
-        let submit_info = vk::SubmitInfo::default()
-            .wait_semaphores(slice::from_ref(&present_complete_semaphore))
-            .wait_dst_stage_mask(slice::from_ref(&wait_dst_stage_mask))
-            .command_buffers(slice::from_ref(&command_buffer))
-            .signal_semaphores(slice::from_ref(&render_finished_semaphore));
+        let graphics_wait_stage = vk::PipelineStageFlags::VERTEX_INPUT;
+        let mut graphics_timeline_info = vk::TimelineSemaphoreSubmitInfo::default()
+            .wait_semaphore_values(slice::from_ref(&graphics_wait_value))
+            .signal_semaphore_values(slice::from_ref(&graphics_signal_value));
+
+        let graphics_submit_info = vk::SubmitInfo::default()
+            .push_next(&mut graphics_timeline_info)
+            .wait_semaphores(slice::from_ref(&self.sync.semaphore))
+            .wait_dst_stage_mask(slice::from_ref(&graphics_wait_stage))
+            .command_buffers(slice::from_ref(
+                &self.commands.graphics_cmd_buffers[self.frame_index],
+            ))
+            .signal_semaphores(slice::from_ref(&self.sync.semaphore));
+
         unsafe {
             device_h.queue_submit(
                 self.device.queue,
-                slice::from_ref(&submit_info),
-                inflight_fence,
-            )?
-        };
+                slice::from_ref(&graphics_submit_info),
+                vk::Fence::null(),
+            )?;
+        }
 
-        // Present image
+        // Block the CPU until graphics signals N+2, guaranteeing the
+        // swapchain image is fully rendered before we hand it to the compositor.
+        let semaphore_wait_info = vk::SemaphoreWaitInfo::default()
+            .semaphores(slice::from_ref(&self.sync.semaphore))
+            .values(slice::from_ref(&graphics_signal_value));
+        unsafe {
+            device_h.wait_semaphores(&semaphore_wait_info, u64::MAX)?;
+        }
+        // Present — no binary semaphore needed since we already waited on the
+        // timeline above.
         let present_info = vk::PresentInfoKHR::default()
-            .wait_semaphores(slice::from_ref(&render_finished_semaphore))
             .swapchains(slice::from_ref(&self.swap_chain.handle))
             .image_indices(slice::from_ref(&image_index));
         let presentation = unsafe {
@@ -255,7 +282,9 @@ impl HelloTriangleApp {
             Err(e) => bail!(e),
         }
 
+        self.last_frame_time = frame_start;
         self.frame_index = (self.frame_index + 1) % Self::MAX_FRAMES_INFLIGHT;
+
         Ok(())
     }
 
@@ -279,6 +308,7 @@ impl HelloTriangleApp {
                 ..
             } => {
                 log::debug!("Window restored/exposed");
+                self.last_frame_time = Instant::now();
                 self.minimized = false;
             }
 
@@ -336,18 +366,15 @@ impl HelloTriangleApp {
     }
 }
 
-impl Drop for HelloTriangleApp {
+impl Drop for HelloParticlesApp {
     fn drop(&mut self) {
         unsafe {
-            self.pipeline.destroy(&self.device);
+            self.compute_pipeline.destroy(&self.device);
+            self.graphics_pipeline.destroy(&self.device);
 
-            self.texture_sampler.destroy(&self.device);
-            self.texture_image.destroy(&self.device);
+            self.storage_buffers.destroy(&self.device);
             self.uniform_buffers.destroy(&self.device);
             self.descriptors.destroy(&self.device);
-
-            self.index_buffer.destroy(&self.device);
-            self.vertex_buffer.destroy(&self.device);
 
             self.sync.destroy(&self.device);
             self.commands.destroy(&self.device);
@@ -360,10 +387,8 @@ impl Drop for HelloTriangleApp {
 }
 
 fn main() -> anyhow::Result<()> {
-    env_logger::init_from_env(
-        env_logger::Env::default().filter_or("RUST_LOG", "vulkan=warn,vulkan_tuto_rs=info,info"),
-    );
-    let app = HelloTriangleApp::new()?;
+    env_logger::init();
+    let app = HelloParticlesApp::new()?;
     app.run()?;
     Ok(())
 }
