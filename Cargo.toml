@@ -10,10 +10,12 @@ bytemuck = { version = "1", features = ["derive"] }
 rand = "0.10"
 env_logger = "0.11"
 glam = { version = "0.32", features = ["bytemuck"] }
+gltf = "1"
 image = { version = "0.25", default-features = false, features = [
   "jpeg",
   "png",
 ] }
+ktx2 = "0.5"
 log = "0.4"
 sdl3 = { version = "0.18", features = ["ash"] }
 tobj = { version = "4", default-features = false }

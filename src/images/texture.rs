@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::slice;
 
-use anyhow::ensure;
+use anyhow::{Context, anyhow, ensure};
 use ash::prelude::VkResult;
 use ash::vk::{self, ImageUsageFlags};
 
@@ -18,7 +18,7 @@ pub struct TextureImage {
 }
 
 impl TextureImage {
-    pub fn new<P>(
+    pub fn from_png<P>(
         instance: &Instance,
         physical_device: &PhysicalDevice,
         device: &Device,
@@ -117,6 +117,160 @@ impl TextureImage {
             .image(raw.handle)
             .view_type(vk::ImageViewType::TYPE_2D)
             .format(vk::Format::R8G8B8A8_SRGB)
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_mip_level(0)
+                    .level_count(mip_levels)
+                    .base_array_layer(0)
+                    .layer_count(1),
+            );
+        let view = unsafe { device_h.create_image_view(&view_ci, None)? };
+
+        Ok(Self { raw, view })
+    }
+
+    pub fn from_ktx2<P>(
+        instance: &Instance,
+        physical_device: &PhysicalDevice,
+        device: &Device,
+        commands: &SceneCommands,
+        path: P,
+    ) -> anyhow::Result<Self>
+    where
+        P: AsRef<Path>,
+    {
+        let device_h = &device.handle;
+
+        let bytes = std::fs::read(path.as_ref())
+            .with_context(|| format!("Failed to read {}", path.as_ref().display()))?;
+        let ktx = ktx2::Reader::new(&bytes).map_err(|e| anyhow!("Failed to parse KTX2: {e:?}"))?;
+
+        let header = ktx.header();
+        let width = header.pixel_width;
+        let height = header.pixel_height;
+        let mip_levels = header.level_count.max(1);
+
+        // Format comes directly from the KTX2 file
+        let format = vk::Format::from_raw(
+            header
+                .format
+                .ok_or_else(|| anyhow!("KTX2 has no format"))?
+                .value() as i32,
+        );
+
+        // Collect all mip level data into a single staging buffer
+        let all_data: Vec<u8> = ktx.levels().flat_map(|level| level.data.to_vec()).collect();
+        let image_size = all_data.len() as vk::DeviceSize;
+
+        // Upload to staging buffer
+        let mut staging = RawBuffer::new(
+            &instance.handle,
+            physical_device.handle,
+            device_h,
+            image_size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
+        unsafe {
+            let data =
+                device_h.map_memory(staging.memory, 0, image_size, vk::MemoryMapFlags::empty())?;
+            let slice = slice::from_raw_parts_mut(data as *mut u8, image_size as usize);
+            slice.copy_from_slice(&all_data);
+            device_h.unmap_memory(staging.memory);
+        }
+
+        // Create device-local image with all mip levels
+        let raw = RawImage::new(
+            &instance.handle,
+            physical_device.handle,
+            device_h,
+            width,
+            height,
+            format,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            mip_levels,
+            vk::SampleCountFlags::TYPE_1,
+        )?;
+
+        one_time_submit(device_h, device.queue, commands.pool, |cmd| {
+            // Transition all mip levels to TRANSFER_DST_OPTIMAL
+            transition_image_layout(
+                device_h,
+                cmd,
+                raw.handle,
+                vk::ImageAspectFlags::COLOR,
+                vk::PipelineStageFlags2::TOP_OF_PIPE,
+                vk::AccessFlags2::empty(),
+                vk::PipelineStageFlags2::TRANSFER,
+                vk::AccessFlags2::TRANSFER_WRITE,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                mip_levels,
+            );
+
+            // Copy each mip level from staging buffer
+            let mut offset = 0u64;
+            for (mip_level, level_data) in ktx.levels().enumerate() {
+                let mip_width = (width >> mip_level).max(1);
+                let mip_height = (height >> mip_level).max(1);
+                let level_size = level_data.data.len() as u64;
+
+                let region = vk::BufferImageCopy::default()
+                    .buffer_offset(offset)
+                    .buffer_row_length(0)
+                    .buffer_image_height(0)
+                    .image_subresource(
+                        vk::ImageSubresourceLayers::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .mip_level(mip_level as u32)
+                            .base_array_layer(0)
+                            .layer_count(1),
+                    )
+                    .image_offset(vk::Offset3D::default())
+                    .image_extent(vk::Extent3D {
+                        width: mip_width,
+                        height: mip_height,
+                        depth: 1,
+                    });
+
+                unsafe {
+                    device_h.cmd_copy_buffer_to_image(
+                        cmd,
+                        staging.handle,
+                        raw.handle,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        slice::from_ref(&region),
+                    );
+                }
+
+                offset += level_size;
+            }
+
+            // Transition all mip levels to SHADER_READ_ONLY_OPTIMAL
+            transition_image_layout(
+                device_h,
+                cmd,
+                raw.handle,
+                vk::ImageAspectFlags::COLOR,
+                vk::PipelineStageFlags2::TRANSFER,
+                vk::AccessFlags2::TRANSFER_WRITE,
+                vk::PipelineStageFlags2::FRAGMENT_SHADER,
+                vk::AccessFlags2::SHADER_READ,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                mip_levels,
+            );
+        })?;
+
+        unsafe { staging.destroy(device_h) };
+
+        let view_ci = vk::ImageViewCreateInfo::default()
+            .image(raw.handle)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .format(format)
             .subresource_range(
                 vk::ImageSubresourceRange::default()
                     .aspect_mask(vk::ImageAspectFlags::COLOR)

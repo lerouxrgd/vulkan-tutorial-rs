@@ -63,7 +63,7 @@ impl HelloSceneApp {
         let commands = SceneCommands::new(&device, &physical_device, Self::MAX_FRAMES_INFLIGHT)?;
         let sync = SceneSync::new(&device, &swap_chain, Self::MAX_FRAMES_INFLIGHT)?;
 
-        let model = Model::from_obj("assets/models/viking_room.obj")?;
+        let model = Model::from_gltf("assets/models/viking_room.glb")?;
         let vertex_buffer = VertexBuffer::new(
             &instance,
             &physical_device,
@@ -86,12 +86,12 @@ impl HelloSceneApp {
             &device,
             Self::MAX_FRAMES_INFLIGHT,
         )?;
-        let texture_image = TextureImage::new(
+        let texture_image = TextureImage::from_ktx2(
             &instance,
             &physical_device,
             &device,
             &commands,
-            "assets/textures/viking_room.png",
+            "assets/textures/viking_room.ktx2",
         )?;
         let texture_sampler = TextureSampler::new(&instance, &physical_device, &device)?;
         descriptors.allocate_desc_sets(
