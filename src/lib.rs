@@ -2,6 +2,7 @@ pub mod buffers;
 pub mod commands;
 pub mod descriptors;
 pub mod devices;
+pub mod game_object;
 pub mod images;
 pub mod instance;
 pub mod logging;

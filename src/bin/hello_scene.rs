@@ -3,10 +3,12 @@ use std::time::Instant;
 
 use anyhow::bail;
 use ash::vk;
-use vulkan_tuto::buffers::{IndexBuffer, Model, MvpMatrices, UniformBuffers, VertexBuffer};
+use glam::{Mat4, Vec3};
+use vulkan_tuto::buffers::{IndexBuffer, Model, VertexBuffer};
 use vulkan_tuto::commands::SceneCommands;
-use vulkan_tuto::descriptors::SceneDescriptors;
+use vulkan_tuto::descriptors::SceneDescriptorPool;
 use vulkan_tuto::devices::{Device, PhysicalDevice};
+use vulkan_tuto::game_object::{GameObject, setup_game_objects};
 use vulkan_tuto::images::{TextureImage, TextureSampler};
 use vulkan_tuto::instance::Instance;
 use vulkan_tuto::pipelines::ScenePipeline;
@@ -15,7 +17,7 @@ use vulkan_tuto::swap_chain::SwapChain;
 use vulkan_tuto::sync::SceneSync;
 
 struct HelloSceneApp {
-    start_time: Instant,
+    last_frame_time: Instant,
 
     sdl_context: sdl3::Sdl,
     window: sdl3::video::Window,
@@ -33,10 +35,10 @@ struct HelloSceneApp {
     vertex_buffer: VertexBuffer,
     index_buffer: IndexBuffer,
 
-    descriptors: SceneDescriptors,
-    uniform_buffers: UniformBuffers<MvpMatrices>,
+    descriptor_pool: SceneDescriptorPool,
     texture_image: TextureImage,
     texture_sampler: TextureSampler,
+    game_objects: Vec<GameObject>,
 
     pipeline: ScenePipeline,
 }
@@ -79,13 +81,8 @@ impl HelloSceneApp {
             &model.indices,
         )?;
 
-        let mut descriptors = SceneDescriptors::new(&device, Self::MAX_FRAMES_INFLIGHT)?;
-        let uniform_buffers = UniformBuffers::new(
-            &instance,
-            &physical_device,
-            &device,
-            Self::MAX_FRAMES_INFLIGHT,
-        )?;
+        let descriptor_pool =
+            SceneDescriptorPool::new(&device, Self::MAX_FRAMES_INFLIGHT, GameObject::COUNT)?;
         let texture_image = TextureImage::from_ktx2(
             &instance,
             &physical_device,
@@ -94,25 +91,32 @@ impl HelloSceneApp {
             "assets/textures/viking_room.ktx2",
         )?;
         let texture_sampler = TextureSampler::new(&instance, &physical_device, &device)?;
-        descriptors.allocate_desc_sets(
-            &device,
-            &uniform_buffers,
-            &texture_image,
-            &texture_sampler,
-        )?;
+        let mut game_objects = (0..GameObject::COUNT)
+            .map(|_| {
+                GameObject::new(
+                    &instance,
+                    &physical_device,
+                    &device,
+                    &descriptor_pool,
+                    &texture_image,
+                    &texture_sampler,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        setup_game_objects(&mut game_objects);
 
         let pipeline = ScenePipeline::new(
             &physical_device,
             &device,
             &swap_chain,
-            &descriptors,
+            &descriptor_pool,
             concat!(env!("OUT_DIR"), "/scene.spv"),
         )?;
 
         log::info!("Selected device: {physical_device:?}");
 
         Ok(Self {
-            start_time: Instant::now(),
+            last_frame_time: Instant::now(),
 
             sdl_context,
             window,
@@ -130,17 +134,20 @@ impl HelloSceneApp {
             vertex_buffer,
             index_buffer,
 
-            descriptors,
-            uniform_buffers,
+            descriptor_pool,
             texture_image,
             texture_sampler,
+            game_objects,
 
             pipeline,
         })
     }
 
     fn draw_frame(&mut self) -> anyhow::Result<()> {
-        let delta_time = self.start_time.elapsed().as_secs_f32();
+        let frame_start = Instant::now();
+        let delta_time = frame_start
+            .duration_since(self.last_frame_time)
+            .as_secs_f32();
 
         let device_h = &self.device.handle;
         let inflight_fence = self.sync.inflight_fences[self.frame_index];
@@ -182,8 +189,23 @@ impl HelloSceneApp {
         };
         let render_finished_semaphore = self.sync.render_finished_semaphores[image_index as usize];
 
-        self.uniform_buffers
-            .update(self.frame_index, delta_time, &self.swap_chain);
+        // Update uniform buffers
+        let extent = self.swap_chain.extent;
+        let view = Mat4::look_at_rh(
+            Vec3::new(2.0, 2.0, 6.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let mut proj = Mat4::perspective_rh(
+            45.0_f32.to_radians(),
+            extent.width as f32 / extent.height as f32,
+            0.1,
+            20.0,
+        );
+        proj.y_axis.y *= -1.0; // flip Y axis: glm uses OpenGL convention (Y up), Vulkan has Y down in NDC
+        for game_object in &mut self.game_objects {
+            game_object.update(self.frame_index, delta_time, view, proj);
+        }
 
         // Only reset the fence if we are submitting work
         unsafe { device_h.reset_fences(slice::from_ref(&inflight_fence))? }
@@ -195,7 +217,7 @@ impl HelloSceneApp {
             &self.pipeline,
             &self.vertex_buffer,
             &self.index_buffer,
-            &self.descriptors,
+            &self.game_objects,
             image_index as usize,
             self.frame_index,
         )?;
@@ -242,7 +264,9 @@ impl HelloSceneApp {
             Err(e) => bail!(e),
         }
 
+        self.last_frame_time = frame_start;
         self.frame_index = (self.frame_index + 1) % Self::MAX_FRAMES_INFLIGHT;
+
         Ok(())
     }
 
@@ -328,10 +352,12 @@ impl Drop for HelloSceneApp {
         unsafe {
             self.pipeline.destroy(&self.device);
 
+            for game_object in self.game_objects.iter_mut() {
+                game_object.destroy(&self.device);
+            }
             self.texture_sampler.destroy(&self.device);
             self.texture_image.destroy(&self.device);
-            self.uniform_buffers.destroy(&self.device);
-            self.descriptors.destroy(&self.device);
+            self.descriptor_pool.destroy(&self.device);
 
             self.index_buffer.destroy(&self.device);
             self.vertex_buffer.destroy(&self.device);
@@ -348,7 +374,7 @@ impl Drop for HelloSceneApp {
 
 fn main() -> anyhow::Result<()> {
     env_logger::init_from_env(
-        env_logger::Env::default().filter_or("RUST_LOG", "vulkan=warn,vulkan_tuto_rs=info,info"),
+        env_logger::Env::default().filter_or("RUST_LOG", "vulkan=warn,vulkan_tuto=info,info"),
     );
     let app = HelloSceneApp::new()?;
     app.run()?;

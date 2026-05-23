@@ -91,6 +91,8 @@ impl HelloParticlesApp {
             concat!(env!("OUT_DIR"), "/particles_compute.spv"),
         )?;
 
+        log::info!("Selected device: {physical_device:?}");
+
         Ok(Self {
             last_frame_time: Instant::now(),
 
@@ -387,7 +389,9 @@ impl Drop for HelloParticlesApp {
 }
 
 fn main() -> anyhow::Result<()> {
-    env_logger::init();
+    env_logger::init_from_env(
+        env_logger::Env::default().filter_or("RUST_LOG", "vulkan=warn,vulkan_tuto=info,info"),
+    );
     let app = HelloParticlesApp::new()?;
     app.run()?;
     Ok(())

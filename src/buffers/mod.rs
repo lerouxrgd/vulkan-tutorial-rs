@@ -35,8 +35,8 @@ impl Model {
                     vertices.push(Vertex {
                         pos: glam::Vec3::new(
                             mesh.positions[vi * 3],
-                            mesh.positions[vi * 3 + 1],
-                            mesh.positions[vi * 3 + 2],
+                            mesh.positions[vi * 3 + 2],  // Z becomes Y
+                            -mesh.positions[vi * 3 + 1], // Y becomes -Z
                         ),
                         color: glam::Vec3::ONE,
                         tex_coord: glam::Vec2::new(
@@ -86,7 +86,7 @@ impl Model {
 
                 for (pos, tex_coord) in positions.iter().zip(tex_coords.iter()) {
                     vertices.push(Vertex {
-                        pos: glam::Vec3::new(pos[0], -pos[2], pos[1]), // glTF Y-up → Z-up
+                        pos: glam::Vec3::new(pos[0], pos[1], pos[2]),
                         color: glam::Vec3::ONE,
                         tex_coord: glam::Vec2::new(tex_coord[0], tex_coord[1]), // no Y flip for glTF
                     });

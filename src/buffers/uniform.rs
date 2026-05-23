@@ -3,12 +3,10 @@ use std::time::Duration;
 
 use ash::vk;
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3};
 
 use crate::buffers::raw::RawBuffer;
 use crate::devices::{Device, PhysicalDevice};
 use crate::instance::Instance;
-use crate::swap_chain::SwapChain;
 
 #[non_exhaustive]
 pub struct UniformBuffer<T> {
@@ -113,32 +111,9 @@ where
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct MvpMatrices {
-    pub model: Mat4,
-    pub view: Mat4,
-    pub proj: Mat4,
-}
-
-impl UniformBuffers<MvpMatrices> {
-    pub fn update(&mut self, current_frame: usize, delta_time: f32, swap_chain: &SwapChain) {
-        let extent = &swap_chain.extent;
-
-        let model = Mat4::from_rotation_z(delta_time * 90.0_f32.to_radians());
-        let view = Mat4::look_at_rh(
-            Vec3::new(2.0, 2.0, 2.0),
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(0.0, 0.0, 1.0),
-        );
-        let mut proj = Mat4::perspective_rh(
-            45.0_f32.to_radians(),
-            extent.width as f32 / extent.height as f32,
-            0.1,
-            10.0,
-        );
-        proj.y_axis.y *= -1.0; // flip Y axis: glm uses OpenGL convention (Y up), Vulkan has Y down in NDC
-
-        let ubo = MvpMatrices { model, view, proj };
-        self.buffers[current_frame].write(ubo);
-    }
+    pub model: glam::Mat4,
+    pub view: glam::Mat4,
+    pub proj: glam::Mat4,
 }
 
 #[repr(C)]

@@ -4,8 +4,9 @@ use ash::prelude::VkResult;
 use ash::vk;
 
 use crate::buffers::{IndexBuffer, Particle, StorageBuffers, VertexBuffer};
-use crate::descriptors::{ParticlesDescriptors, SceneDescriptors};
+use crate::descriptors::ParticlesDescriptors;
 use crate::devices::{Device, PhysicalDevice};
+use crate::game_object::GameObject;
 use crate::images::transition_image_layout;
 use crate::pipelines::{ParticlesComputePipeline, ParticlesPipeline, ScenePipeline};
 use crate::swap_chain::SwapChain;
@@ -46,7 +47,7 @@ impl SceneCommands {
         pipeline: &ScenePipeline,
         vertex_buffer: &VertexBuffer,
         index_buffer: &IndexBuffer,
-        descriptors: &SceneDescriptors,
+        game_objects: &[GameObject],
         image_index: usize,
         frame_index: usize,
     ) -> VkResult<()> {
@@ -187,14 +188,17 @@ impl SceneCommands {
                 0,
                 vk::IndexType::UINT32,
             );
-            device_h.cmd_bind_descriptor_sets(
-                cmd_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipeline.layout,
-                0,
-                slice::from_ref(&descriptors.desc_sets[frame_index]),
-                &[],
-            );
+            for game_object in game_objects {
+                device_h.cmd_bind_descriptor_sets(
+                    cmd_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    pipeline.layout,
+                    0,
+                    slice::from_ref(&game_object.descriptors[frame_index]),
+                    &[],
+                );
+                device_h.cmd_draw_indexed(cmd_buffer, index_buffer.length, 1, 0, 0, 0);
+            }
             device_h.cmd_draw_indexed(cmd_buffer, index_buffer.length, 1, 0, 0, 0);
             device_h.cmd_end_rendering(cmd_buffer);
         }

@@ -1,6 +1,7 @@
 use std::mem;
 use std::slice;
 
+use anyhow::ensure;
 use ash::prelude::VkResult;
 use ash::vk;
 
@@ -9,14 +10,16 @@ use crate::devices::Device;
 use crate::images::{TextureImage, TextureSampler};
 
 #[non_exhaustive]
-pub struct SceneDescriptors {
+pub struct SceneDescriptorPool {
     pub desc_set_layout: vk::DescriptorSetLayout,
     pub pool: vk::DescriptorPool,
-    pub desc_sets: Vec<vk::DescriptorSet>,
+    pub max_frames_inflight: usize,
 }
 
-impl SceneDescriptors {
-    pub fn new(device: &Device, max_frames_in_flight: usize) -> VkResult<Self> {
+impl SceneDescriptorPool {
+    pub fn new(device: &Device, max_frames_inflight: usize, max_objects: usize) -> VkResult<Self> {
+        let total = (max_frames_inflight * max_objects) as u32;
+
         let bindings = [
             vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
@@ -36,46 +39,44 @@ impl SceneDescriptors {
                 .create_descriptor_set_layout(&desc_set_layout_ci, None)?
         };
 
-        let pool_size = [
+        let pool_sizes = [
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(max_frames_in_flight as u32),
+                .descriptor_count(total),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(max_frames_in_flight as u32),
+                .descriptor_count(total),
         ];
-
         let pool_ci = vk::DescriptorPoolCreateInfo::default()
             .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
-            .max_sets(max_frames_in_flight as u32)
-            .pool_sizes(&pool_size);
-
+            .max_sets(total)
+            .pool_sizes(&pool_sizes);
         let pool = unsafe { device.handle.create_descriptor_pool(&pool_ci, None)? };
 
         Ok(Self {
             desc_set_layout,
             pool,
-            desc_sets: Vec::new(),
+            max_frames_inflight,
         })
     }
 
-    pub fn allocate_desc_sets(
-        &mut self,
+    pub fn allocate(
+        &self,
         device: &Device,
         uniform_buffers: &UniformBuffers<MvpMatrices>,
         texture: &TextureImage,
         sampler: &TextureSampler,
-    ) -> VkResult<()> {
-        let max_frames_in_flight = uniform_buffers.len();
+    ) -> anyhow::Result<SceneDescriptorSets> {
+        ensure!(uniform_buffers.len() == self.max_frames_inflight);
 
-        let layouts = vec![self.desc_set_layout; max_frames_in_flight];
+        let layouts = vec![self.desc_set_layout; self.max_frames_inflight];
         let alloc_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(self.pool)
             .set_layouts(&layouts);
 
-        self.desc_sets = unsafe { device.handle.allocate_descriptor_sets(&alloc_info)? };
+        let desc_sets = unsafe { device.handle.allocate_descriptor_sets(&alloc_info)? };
 
-        for (i, &desc_set) in self.desc_sets.iter().enumerate() {
+        for (i, &desc_set) in desc_sets.iter().enumerate() {
             let buffer_info = vk::DescriptorBufferInfo::default()
                 .buffer(uniform_buffers.buffers[i].handle())
                 .offset(0)
@@ -86,17 +87,13 @@ impl SceneDescriptors {
                 .image_view(texture.view)
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
 
-            // For descriptor set i...
             let descriptor_writes = [
-                // At binding 0, point at uniform_buffers[i] starting at offset 0
-                // with a range of sizeof(MvpMatrices)
                 vk::WriteDescriptorSet::default()
                     .dst_set(desc_set)
                     .dst_binding(0)
                     .dst_array_element(0)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .buffer_info(slice::from_ref(&buffer_info)),
-                // At binding 1, point at combined image/sampler
                 vk::WriteDescriptorSet::default()
                     .dst_set(desc_set)
                     .dst_binding(1)
@@ -106,32 +103,39 @@ impl SceneDescriptors {
             ];
 
             unsafe {
-                // Wires each descriptor set to its corresponding data (vk::Buffer handle, image/sampler)
                 device
                     .handle
                     .update_descriptor_sets(&descriptor_writes, &[])
             };
         }
 
-        Ok(())
+        Ok(SceneDescriptorSets { desc_sets })
     }
 
     /// # Safety
     ///
-    /// - Must be called before the `ash::Device` that was used to create this
-    ///   `Descriptor` is destroyed.
-    /// - All descriptor sets allocated from the pool must no longer be in use
-    ///   by the GPU.
-    /// - Must be called at most once. Calling it more than once is undefined
-    ///   behaviour as the underlying handles become invalid after the first call.
+    /// - Must be called after all `SceneDescriptorSets` allocated from this
+    ///   pool have been freed or are no longer in use by the GPU.
+    /// - Must be called at most once.
     pub unsafe fn destroy(&mut self, device: &Device) {
         unsafe {
-            // Freeing the pool implicitly frees all descriptor sets allocated from it
             device.handle.destroy_descriptor_pool(self.pool, None);
             device
                 .handle
                 .destroy_descriptor_set_layout(self.desc_set_layout, None);
         }
+    }
+}
+
+pub struct SceneDescriptorSets {
+    desc_sets: Vec<vk::DescriptorSet>,
+}
+
+impl std::ops::Index<usize> for SceneDescriptorSets {
+    type Output = vk::DescriptorSet;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.desc_sets.index(index)
     }
 }
 

@@ -7,7 +7,7 @@ use anyhow::{anyhow, ensure};
 use ash::vk;
 
 use crate::buffers::{Particle, Vertex};
-use crate::descriptors::{ParticlesDescriptors, SceneDescriptors};
+use crate::descriptors::{ParticlesDescriptors, SceneDescriptorPool};
 use crate::devices::{Device, PhysicalDevice};
 use crate::swap_chain::SwapChain;
 
@@ -64,7 +64,7 @@ impl ScenePipeline {
         physical_device: &PhysicalDevice,
         device: &Device,
         swap_chain: &SwapChain,
-        descriptors: &SceneDescriptors,
+        descriptor_pool: &SceneDescriptorPool,
         spv_path: P,
     ) -> anyhow::Result<Self> {
         let mut shader_module = ShaderModule::from_spv_file(device, spv_path)?;
@@ -128,7 +128,7 @@ impl ScenePipeline {
             vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
         let pipeline_layout_ci = vk::PipelineLayoutCreateInfo::default()
-            .set_layouts(slice::from_ref(&descriptors.desc_set_layout));
+            .set_layouts(slice::from_ref(&descriptor_pool.desc_set_layout));
         let layout = unsafe {
             device
                 .handle
