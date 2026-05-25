@@ -147,3 +147,70 @@ impl ParticlesSync {
         }
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+#[non_exhaustive]
+pub struct ParticlesMtSync {
+    pub image_available_semaphores: Vec<vk::Semaphore>,
+    pub render_finished_semaphores: Vec<vk::Semaphore>,
+    pub compute_finished_semaphores: Vec<vk::Semaphore>,
+    pub inflight_fences: Vec<vk::Fence>,
+}
+
+impl ParticlesMtSync {
+    pub fn new(
+        device: &Device,
+        swap_chain: &SwapChain,
+        max_frames_inflight: usize,
+    ) -> VkResult<Self> {
+        let binary_ci = vk::SemaphoreCreateInfo::default();
+        let fence_ci = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
+
+        let image_available_semaphores = (0..max_frames_inflight)
+            .map(|_| unsafe { device.handle.create_semaphore(&binary_ci, None) })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let render_finished_semaphores =
+            (0..swap_chain.images.len()) // per swapchain image
+                .map(|_| unsafe { device.handle.create_semaphore(&binary_ci, None) })
+                .collect::<Result<Vec<_>, _>>()?;
+
+        let compute_finished_semaphores = (0..max_frames_inflight)
+            .map(|_| unsafe { device.handle.create_semaphore(&binary_ci, None) })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let inflight_fences = (0..max_frames_inflight)
+            .map(|_| unsafe { device.handle.create_fence(&fence_ci, None) })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            image_available_semaphores,
+            render_finished_semaphores,
+            compute_finished_semaphores,
+            inflight_fences,
+        })
+    }
+    /// # Safety
+    ///
+    /// - Must be called before the `ash::Device` that was used to create this
+    ///   `ParticlesMtSync` is destroyed.
+    /// - All semaphores and fences must no longer be in use by the GPU.
+    /// - Must be called at most once.
+    pub unsafe fn destroy(&mut self, device: &Device) {
+        unsafe {
+            for s in self.image_available_semaphores.drain(..) {
+                device.handle.destroy_semaphore(s, None);
+            }
+            for s in self.render_finished_semaphores.drain(..) {
+                device.handle.destroy_semaphore(s, None);
+            }
+            for s in self.compute_finished_semaphores.drain(..) {
+                device.handle.destroy_semaphore(s, None);
+            }
+            for f in self.inflight_fences.drain(..) {
+                device.handle.destroy_fence(f, None);
+            }
+        }
+    }
+}

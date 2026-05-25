@@ -29,6 +29,20 @@ fn main() {
         out_dir.join("particles_compute.spv"),
         &["-entry", "compMain"],
     );
+
+    compile_shader(
+        &slangc,
+        "assets/shaders/particles_multithread.slang",
+        out_dir.join("particles_multithread_graphics.spv"),
+        &["-entry", "vertMain", "-entry", "fragMain"],
+    );
+
+    compile_shader(
+        &slangc,
+        "assets/shaders/particles_multithread.slang",
+        out_dir.join("particles_multithread_compute.spv"),
+        &["-entry", "compMain"],
+    );
 }
 
 fn compile_shader(slangc: &PathBuf, src: &str, out: PathBuf, entries: &[&str]) {

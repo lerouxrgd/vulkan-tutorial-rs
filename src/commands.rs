@@ -362,110 +362,195 @@ impl ParticlesCommands {
         frame_index: usize,
     ) -> VkResult<()> {
         let cmd = self.graphics_cmd_buffers[frame_index];
-        let device_h = &device.handle;
-        let swapchain_image = swap_chain.images[image_index];
-        let extent = swap_chain.extent;
-
-        unsafe {
-            device_h.reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
-            device_h.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::default())?;
-
-            transition_image_layout(
-                device_h,
-                cmd,
-                swapchain_image,
-                vk::ImageAspectFlags::COLOR,
-                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                vk::AccessFlags2::empty(),
-                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-                vk::ImageLayout::UNDEFINED,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                1,
-            );
-
-            let clear_value = vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
-                },
-            };
-
-            let attachment_info = vk::RenderingAttachmentInfo::default()
-                .image_view(swap_chain.image_views[image_index])
-                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .load_op(vk::AttachmentLoadOp::CLEAR)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .clear_value(clear_value);
-
-            let rendering_info = vk::RenderingInfo::default()
-                .render_area(vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent,
-                })
-                .layer_count(1)
-                .color_attachments(slice::from_ref(&attachment_info));
-
-            device_h.cmd_begin_rendering(cmd, &rendering_info);
-
-            device_h.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, pipeline.handle);
-
-            device_h.cmd_set_viewport(
-                cmd,
-                0,
-                &[vk::Viewport {
-                    x: 0.0,
-                    y: 0.0,
-                    width: extent.width as f32,
-                    height: extent.height as f32,
-                    min_depth: 0.0,
-                    max_depth: 1.0,
-                }],
-            );
-
-            device_h.cmd_set_scissor(
-                cmd,
-                0,
-                &[vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent,
-                }],
-            );
-
-            device_h.cmd_bind_vertex_buffers(
-                cmd,
-                0,
-                &[storage_buffers.buffers[frame_index].handle()],
-                &[0],
-            );
-
-            device_h.cmd_draw(cmd, Particle::COUNT as u32, 1, 0, 0);
-
-            device_h.cmd_end_rendering(cmd);
-
-            transition_image_layout(
-                device_h,
-                cmd,
-                swapchain_image,
-                vk::ImageAspectFlags::COLOR,
-                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-                vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
-                vk::AccessFlags2::empty(),
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                vk::ImageLayout::PRESENT_SRC_KHR,
-                1,
-            );
-
-            device_h.end_command_buffer(cmd)?;
-        }
-
-        Ok(())
+        record_particles_graphics(
+            cmd,
+            device,
+            swap_chain,
+            pipeline,
+            storage_buffers,
+            image_index,
+            frame_index,
+        )
     }
 
     /// # Safety
     ///
     /// - Must be called before the `ash::Device` that was used to create this
     ///   `ParticlesCommands` is destroyed.
+    /// - No command buffers from this pool may be in use by the GPU.
+    /// - Must be called at most once.
+    pub unsafe fn destroy(&mut self, device: &Device) {
+        unsafe { device.handle.destroy_command_pool(self.pool, None) };
+    }
+}
+
+fn record_particles_graphics(
+    cmd: vk::CommandBuffer,
+    device: &Device,
+    swap_chain: &SwapChain,
+    pipeline: &ParticlesPipeline,
+    storage_buffers: &StorageBuffers,
+    image_index: usize,
+    frame_index: usize,
+) -> VkResult<()> {
+    let device_h = &device.handle;
+    let swapchain_image = swap_chain.images[image_index];
+    let extent = swap_chain.extent;
+
+    unsafe {
+        device_h.reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
+        device_h.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::default())?;
+
+        transition_image_layout(
+            device_h,
+            cmd,
+            swapchain_image,
+            vk::ImageAspectFlags::COLOR,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::empty(),
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            1,
+        );
+
+        let clear_value = vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0],
+            },
+        };
+
+        let attachment_info = vk::RenderingAttachmentInfo::default()
+            .image_view(swap_chain.image_views[image_index])
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .clear_value(clear_value);
+
+        let rendering_info = vk::RenderingInfo::default()
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent,
+            })
+            .layer_count(1)
+            .color_attachments(slice::from_ref(&attachment_info));
+
+        device_h.cmd_begin_rendering(cmd, &rendering_info);
+
+        device_h.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, pipeline.handle);
+
+        device_h.cmd_set_viewport(
+            cmd,
+            0,
+            &[vk::Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: extent.width as f32,
+                height: extent.height as f32,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            }],
+        );
+
+        device_h.cmd_set_scissor(
+            cmd,
+            0,
+            &[vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent,
+            }],
+        );
+
+        device_h.cmd_bind_vertex_buffers(
+            cmd,
+            0,
+            &[storage_buffers.buffers[frame_index].handle()],
+            &[0],
+        );
+
+        device_h.cmd_draw(cmd, Particle::COUNT as u32, 1, 0, 0);
+
+        device_h.cmd_end_rendering(cmd);
+
+        transition_image_layout(
+            device_h,
+            cmd,
+            swapchain_image,
+            vk::ImageAspectFlags::COLOR,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+            vk::AccessFlags2::empty(),
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::ImageLayout::PRESENT_SRC_KHR,
+            1,
+        );
+
+        device_h.end_command_buffer(cmd)?;
+    }
+
+    Ok(())
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+#[non_exhaustive]
+pub struct ParticlesMtCommands {
+    pub pool: vk::CommandPool,
+    pub graphics_cmd_buffers: Vec<vk::CommandBuffer>,
+}
+
+impl ParticlesMtCommands {
+    pub fn new(
+        device: &Device,
+        physical_device: &PhysicalDevice,
+        max_frames_inflight: usize,
+    ) -> VkResult<Self> {
+        let pool_ci = vk::CommandPoolCreateInfo::default()
+            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+            .queue_family_index(physical_device.queue_family);
+
+        let pool = unsafe { device.handle.create_command_pool(&pool_ci, None)? };
+
+        let alloc_info = vk::CommandBufferAllocateInfo::default()
+            .command_pool(pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(max_frames_inflight as u32);
+
+        let graphics_cmd_buffers = unsafe { device.handle.allocate_command_buffers(&alloc_info)? };
+
+        Ok(Self {
+            pool,
+            graphics_cmd_buffers,
+        })
+    }
+
+    pub fn record_graphics(
+        &mut self,
+        device: &Device,
+        swap_chain: &SwapChain,
+        pipeline: &ParticlesPipeline,
+        storage_buffers: &StorageBuffers,
+        image_index: usize,
+        frame_index: usize,
+    ) -> VkResult<()> {
+        let cmd = self.graphics_cmd_buffers[frame_index];
+        record_particles_graphics(
+            cmd,
+            device,
+            swap_chain,
+            pipeline,
+            storage_buffers,
+            image_index,
+            frame_index,
+        )
+    }
+
+    /// # Safety
+    ///
+    /// - Must be called before the `ash::Device` that was used to create this
+    ///   `ParticlesMtCommands` is destroyed.
     /// - No command buffers from this pool may be in use by the GPU.
     /// - Must be called at most once.
     pub unsafe fn destroy(&mut self, device: &Device) {

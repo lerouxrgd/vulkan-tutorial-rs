@@ -10,3 +10,4 @@ pub mod pipelines;
 pub mod surface;
 pub mod swap_chain;
 pub mod sync;
+pub mod worker;

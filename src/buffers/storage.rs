@@ -8,7 +8,7 @@ use glam::{Vec2, Vec4};
 use rand::RngExt;
 
 use crate::buffers::raw::RawBuffer;
-use crate::commands::{ParticlesCommands, one_time_submit};
+use crate::commands::one_time_submit;
 use crate::devices::{Device, PhysicalDevice};
 use crate::instance::Instance;
 
@@ -96,7 +96,7 @@ impl StorageBuffers {
         instance: &Instance,
         physical_device: &PhysicalDevice,
         device: &Device,
-        commands: &ParticlesCommands,
+        command_pool: vk::CommandPool,
         max_frames_in_flight: usize,
         width: u32,
         height: u32,
@@ -139,7 +139,7 @@ impl StorageBuffers {
                     vk::MemoryPropertyFlags::DEVICE_LOCAL,
                 )?;
 
-                one_time_submit(device_h, device.queue, commands.pool, |cmd| unsafe {
+                one_time_submit(device_h, device.queue, command_pool, |cmd| unsafe {
                     device_h.cmd_copy_buffer(
                         cmd,
                         staging.handle,

@@ -10,6 +10,7 @@ use crate::buffers::{Particle, Vertex};
 use crate::descriptors::{ParticlesDescriptors, SceneDescriptorPool};
 use crate::devices::{Device, PhysicalDevice};
 use crate::swap_chain::SwapChain;
+use crate::worker::ParticleGroup;
 
 #[non_exhaustive]
 pub struct ShaderModule {
@@ -360,6 +361,72 @@ impl ParticlesComputePipeline {
     ///   `ParticlesComputePipeline` is destroyed.
     /// - Must be called at most once. Calling it more than once is undefined
     ///   behaviour as the underlying handle becomes invalid after the first call.
+    pub unsafe fn destroy(&mut self, device: &Device) {
+        unsafe {
+            device.handle.destroy_pipeline(self.handle, None);
+            device.handle.destroy_pipeline_layout(self.layout, None);
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+#[non_exhaustive]
+pub struct ParticlesComputeMtPipeline {
+    pub handle: vk::Pipeline,
+    pub layout: vk::PipelineLayout,
+}
+
+impl ParticlesComputeMtPipeline {
+    pub fn new<P: AsRef<Path>>(
+        device: &Device,
+        descriptors: &ParticlesDescriptors,
+        spv_path: P,
+    ) -> anyhow::Result<Self> {
+        let mut shader_module = ShaderModule::from_spv_file(device, spv_path)?;
+
+        let compute_shader_stage_ci = vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::COMPUTE)
+            .module(shader_module.handle)
+            .name(c"compMain");
+
+        let push_constant_range = vk::PushConstantRange::default()
+            .stage_flags(vk::ShaderStageFlags::COMPUTE)
+            .offset(0)
+            .size(std::mem::size_of::<ParticleGroup>() as u32);
+
+        let layout = {
+            let layout_ci = vk::PipelineLayoutCreateInfo::default()
+                .set_layouts(slice::from_ref(&descriptors.desc_set_layout))
+                .push_constant_ranges(slice::from_ref(&push_constant_range));
+            unsafe { device.handle.create_pipeline_layout(&layout_ci, None)? }
+        };
+
+        let pipeline_ci = vk::ComputePipelineCreateInfo::default()
+            .stage(compute_shader_stage_ci)
+            .layout(layout);
+
+        let handle = unsafe {
+            device
+                .handle
+                .create_compute_pipelines(
+                    vk::PipelineCache::null(),
+                    slice::from_ref(&pipeline_ci),
+                    None,
+                )
+                .map_err(|(_, e)| e)?[0]
+        };
+
+        unsafe { shader_module.destroy(device) };
+
+        Ok(Self { handle, layout })
+    }
+
+    /// # Safety
+    ///
+    /// - Must be called before the `ash::Device` that was used to create this
+    ///   `ParticlesComputeMtPipeline` is destroyed.
+    /// - Must be called at most once.
     pub unsafe fn destroy(&mut self, device: &Device) {
         unsafe {
             device.handle.destroy_pipeline(self.handle, None);
